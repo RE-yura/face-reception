@@ -115,6 +115,32 @@ describe('withMemoryFallback', () => {
     expect(fellBack).toBe(1);
   });
 
+  it('passes a failed read on, without switching to memory and hiding everyone saved', async () => {
+    const device = await saved('すずき');
+    const primary = breakable(device);
+    primary.breakMethods('listPeople');
+    let fellBack = 0;
+    const store = withMemoryFallback(primary.store, () => fellBack++);
+    await expect(store.listPeople()).rejects.toBeInstanceOf(DOMException);
+    await store.addEnrollment('たなか', [vec(0, 1)], thumb(2));
+    expect(fellBack).toBe(0);
+    expect((await device.listPeople()).map((p) => p.name).sort()).toEqual(['すずき', 'たなか'].sort());
+  });
+
+  it('still deletes from the device after switching to memory, so deleted faces do not come back', async () => {
+    const device = await saved('a', 'b', 'c');
+    const primary = breakable(device);
+    primary.breakMethods('addEnrollment');
+    const store = withMemoryFallback(primary.store, () => {});
+    await store.addEnrollment('d', [vec(1, 1)], thumb(4));
+    const a = (await store.listPeople()).find((p) => p.name === 'a')!;
+    await store.deletePerson(a.id);
+    expect((await device.listPeople()).map((p) => p.name).sort()).toEqual(['b', 'c']);
+    await store.deleteAll();
+    expect(await device.listPeople()).toEqual([]);
+    expect(await store.listPeople()).toEqual([]);
+  });
+
   it('does not fall back for an empty name', async () => {
     const primary = breakable(await saved());
     primary.breakMethods('addEnrollment');

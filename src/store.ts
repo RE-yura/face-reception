@@ -94,9 +94,10 @@ export function createMemoryPeopleStore(initial: Person[] = []): PeopleStore {
 }
 
 /**
- * Uses `primary` until one of its operations fails (a full disk, or a browser refusing storage), then switches for
- * good to an in-memory store that starts with everyone known so far, and calls `onFallback` once. Enrollment and
- * matching keep working; what changes after that is lost on reload.
+ * Uses `primary` until a write fails (a full disk, or a browser refusing storage), then switches for good to an
+ * in-memory store that starts with everyone known so far, and calls `onFallback` once. Enrollment and matching keep
+ * working, and new enrollments are lost on reload. Deletes still go to `primary` too, so deleted faces do not come
+ * back. A failed read is passed on: switching then would hide everyone saved so far.
  */
 export function withMemoryFallback(primary: PeopleStore, onFallback: (error: unknown) => void): PeopleStore {
   let known: Person[] = [];
@@ -117,7 +118,7 @@ export function withMemoryFallback(primary: PeopleStore, onFallback: (error: unk
   };
   return {
     async listPeople() {
-      known = await run((store) => store.listPeople());
+      known = await (memory ? (await memory).listPeople() : primary.listPeople());
       return known;
     },
     async addEnrollment(name, embeddings, thumbnail) {
@@ -125,7 +126,13 @@ export function withMemoryFallback(primary: PeopleStore, onFallback: (error: unk
       if (!name.trim()) throw new Error('name is empty');
       return run((store) => store.addEnrollment(name, embeddings, thumbnail));
     },
-    deletePerson: (id) => run((store) => store.deletePerson(id)),
-    deleteAll: () => run((store) => store.deleteAll()),
+    async deletePerson(id) {
+      if (memory) await primary.deletePerson(id).catch(() => {});
+      return run((store) => store.deletePerson(id));
+    },
+    async deleteAll() {
+      if (memory) await primary.deleteAll().catch(() => {});
+      return run((store) => store.deleteAll());
+    },
   };
 }
