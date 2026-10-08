@@ -1,9 +1,10 @@
-export interface ModelFile {
-  file: string;
+export interface DownloadFile {
+  url: string;
+  /** The exact size; a body of any other size is a failed download. */
   bytes: number;
 }
 
-/** A model did not arrive intact. Unlike a model that arrived but cannot be loaded, trying again may help. */
+/** A file did not arrive intact. Unlike a model that arrived but cannot be loaded, trying again may help. */
 export class DownloadError extends Error {}
 
 export interface DownloadOptions {
@@ -18,7 +19,7 @@ export interface DownloadOptions {
  * small file before the large ones arrive. When any download fails, the others are aborted, and every promise
  * rejects with a DownloadError.
  */
-export function downloadModels(baseUrl: string, files: readonly ModelFile[], options: DownloadOptions): Promise<Uint8Array>[] {
+export function downloadFiles(files: readonly DownloadFile[], options: DownloadOptions): Promise<Uint8Array>[] {
   const { onProgress, idleTimeoutMs, fetch: fetchFile = fetch } = options;
   const controller = new AbortController();
   const total = files.reduce((n, f) => n + f.bytes, 0);
@@ -35,8 +36,8 @@ export function downloadModels(baseUrl: string, files: readonly ModelFile[], opt
     onProgress(loaded, total);
   };
   const downloads = files.map((f) =>
-    download(`${baseUrl}${f.file}`, f.bytes, controller.signal, fetchFile, onChunk).catch((error: unknown) => {
-      const failure = error instanceof DownloadError ? error : new DownloadError(`${f.file}: ${String(error)}`);
+    download(f.url, f.bytes, controller.signal, fetchFile, onChunk).catch((error: unknown) => {
+      const failure = error instanceof DownloadError ? error : new DownloadError(`${f.url}: ${String(error)}`);
       controller.abort(failure);
       throw failure;
     }),

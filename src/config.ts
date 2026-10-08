@@ -12,6 +12,9 @@ export const MODELS = {
   sface: { file: 'face_recognition_sface_2021dec.onnx', bytes: 38_696_353 },
 } as const;
 
+/** Size of onnxruntime-web's ort-wasm-simd-threaded.wasm, downloaded with the models. Update it with onnxruntime-web. */
+export const ORT_WASM_BYTES = 14_239_897;
+
 /** A model download gives up when no data arrives for this long. */
 export const DOWNLOAD_IDLE_TIMEOUT_MS = 20_000;
 

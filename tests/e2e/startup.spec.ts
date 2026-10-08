@@ -83,13 +83,37 @@ test('starts loading the inference engine while the large model is still downloa
   await context.close();
 });
 
-test('says it is getting ready, not stuck at 100%, while the inference engine loads after the models', async ({}, testInfo) => {
+test('says it is getting ready, not stuck at 100%, once everything has downloaded', async ({}, testInfo) => {
   const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
-  const wasm = await holdRequests(context, '**/*.wasm');
+  // Records every text the loading message shows.
+  await context.addInitScript(() => {
+    const w = window as unknown as { __loadMessages: string[] };
+    w.__loadMessages = [];
+    document.addEventListener('DOMContentLoaded', () => {
+      const message = document.getElementById('load-message')!;
+      new MutationObserver(() => w.__loadMessages.push(message.textContent ?? '')).observe(message, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    });
+  });
   const page = await openApp(context);
-  await expect(page.locator('#load-progress')).toHaveJSProperty('value', 1, { timeout: 60_000 });
-  await expect(page.locator('#load-message')).toHaveText('準備しています…');
-  wasm.release();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  const messages = await page.evaluate(() => (window as unknown as { __loadMessages: string[] }).__loadMessages);
+  expect(messages.length).toBeGreaterThan(1);
+  expect(messages.filter((m) => m.includes('100%'))).toEqual([]);
+  expect(messages.at(-1)).toBe('準備しています…');
+  await context.close();
+});
+
+test('offers a retry when the inference engine fails to download', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  await context.route('**/*.wasm', (route) => route.abort());
+  const page = await openApp(context);
+  await expect(page.locator('#start-error-message')).toContainText('モデルの読み込みに失敗しました', { timeout: 60_000 });
+  await context.unroute('**/*.wasm');
+  await page.getByRole('button', { name: 'もう一度試す' }).click();
   await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
   await context.close();
 });

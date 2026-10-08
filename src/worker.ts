@@ -1,13 +1,13 @@
 import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
-import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, DOWNLOAD_IDLE_TIMEOUT_MS, MODELS, NMS_IOU_THRESHOLD } from './config.ts';
-import { DownloadError, downloadModels } from './model-download.ts';
+import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, DOWNLOAD_IDLE_TIMEOUT_MS, MODELS, NMS_IOU_THRESHOLD, ORT_WASM_BYTES } from './config.ts';
+import { DownloadError, downloadFiles } from './model-download.ts';
 import { detectorLayout } from './vision/detector.ts';
 import { FacePipeline } from './vision/pipeline.ts';
 import type { Analysis, WorkerRequest, WorkerResponse } from './worker-protocol.ts';
 
-// Serve the wasm binary from our own build output; GitHub Pages cannot send COOP/COEP, so stay single-threaded.
-ort.env.wasm.wasmPaths = { wasm: wasmUrl };
+// The wasm binary comes from our own build output, downloaded in init() and handed over as wasmBinary.
+// GitHub Pages cannot send COOP/COEP, so stay single-threaded.
 ort.env.wasm.numThreads = 1;
 ort.env.logLevel = 'error';
 
@@ -28,12 +28,22 @@ async function init(modelBaseUrl: string): Promise<void> {
     send({ type: 'init-error', reason: 'unsupported', message: 'OffscreenCanvas is unavailable' });
     return;
   }
-  const [yunet, sface] = downloadModels(modelBaseUrl, [MODELS.yunet, MODELS.sface], {
-    onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
-    idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS,
+  // The wasm goes through the same download as the models, so a slow or broken connection while it loads
+  // gets the idle timeout, the size check and a retry, instead of looking like an unsupported browser.
+  const [yunet, wasm, sface] = downloadFiles(
+    [
+      { url: `${modelBaseUrl}${MODELS.yunet.file}`, bytes: MODELS.yunet.bytes },
+      { url: wasmUrl, bytes: ORT_WASM_BYTES },
+      { url: `${modelBaseUrl}${MODELS.sface.file}`, bytes: MODELS.sface.bytes },
+    ],
+    { onProgress: (loaded, total) => send({ type: 'progress', loaded, total }), idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS },
+  );
+  const yunetWithRuntime = Promise.all([yunet, wasm]).then(([model, binary]) => {
+    ort.env.wasm.wasmBinary = binary;
+    return model;
   });
   try {
-    pipeline = await FacePipeline.create(yunet, sface);
+    pipeline = await FacePipeline.create(yunetWithRuntime, sface);
   } catch (error) {
     send({ type: 'init-error', reason: error instanceof DownloadError ? 'network' : 'unsupported', message: String(error) });
     return;

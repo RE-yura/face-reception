@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DownloadError, downloadModels } from '../../src/model-download.ts';
+import { DownloadError, downloadFiles } from '../../src/model-download.ts';
 
 interface FakeFile {
   body?: Uint8Array;
@@ -44,17 +44,16 @@ function fakeFetch(files: Record<string, FakeFile>) {
 
 const noProgress = () => {};
 
-describe('downloadModels', () => {
+describe('downloadFiles', () => {
   it('downloads each file and reports progress against their total size', async () => {
     const a = bytes(2500);
     const b = bytes(4000, 7);
     const { fetch } = fakeFetch({ 'a.onnx': { body: a }, 'b.onnx': { body: b } });
     const progress: number[] = [];
-    const [gotA, gotB] = downloadModels(
-      '/models/',
+    const [gotA, gotB] = downloadFiles(
       [
-        { file: 'a.onnx', bytes: 2500 },
-        { file: 'b.onnx', bytes: 4000 },
+        { url: '/models/a.onnx', bytes: 2500 },
+        { url: '/models/b.onnx', bytes: 4000 },
       ],
       {
         fetch,
@@ -74,11 +73,10 @@ describe('downloadModels', () => {
   it('treats a body of the wrong size, such as a Wi-Fi login page, as a failed download', async () => {
     const page = new TextEncoder().encode('<!doctype html><title>Wi-Fi login</title>');
     const { fetch } = fakeFetch({ 'a.onnx': { body: page }, 'b.onnx': { body: bytes(3000) } });
-    const [shorter, longer] = downloadModels(
-      '/models/',
+    const [shorter, longer] = downloadFiles(
       [
-        { file: 'a.onnx', bytes: 2500 },
-        { file: 'b.onnx', bytes: 2500 },
+        { url: '/models/a.onnx', bytes: 2500 },
+        { url: '/models/b.onnx', bytes: 2500 },
       ],
       { fetch, idleTimeoutMs: 1000, onProgress: noProgress },
     );
@@ -88,7 +86,7 @@ describe('downloadModels', () => {
 
   it('fails on an HTTP error', async () => {
     const { fetch } = fakeFetch({ 'a.onnx': { status: 404 } });
-    const [a] = downloadModels('/models/', [{ file: 'a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 1000, onProgress: noProgress });
+    const [a] = downloadFiles([{ url: '/models/a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 1000, onProgress: noProgress });
     await expect(a).rejects.toBeInstanceOf(DownloadError);
   });
 
@@ -96,14 +94,14 @@ describe('downloadModels', () => {
     const fetch = (async () => {
       throw new TypeError('Failed to fetch');
     }) as typeof globalThis.fetch;
-    const [a] = downloadModels('/models/', [{ file: 'a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 1000, onProgress: noProgress });
+    const [a] = downloadFiles([{ url: '/models/a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 1000, onProgress: noProgress });
     await expect(a).rejects.toBeInstanceOf(DownloadError);
   });
 
   it('gives up when no data arrives for the idle timeout', async () => {
     const { fetch } = fakeFetch({ 'a.onnx': { stall: true } });
     const started = performance.now();
-    const [a] = downloadModels('/models/', [{ file: 'a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 50, onProgress: noProgress });
+    const [a] = downloadFiles([{ url: '/models/a.onnx', bytes: 10 }], { fetch, idleTimeoutMs: 50, onProgress: noProgress });
     await expect(a).rejects.toBeInstanceOf(DownloadError);
     expect(performance.now() - started).toBeLessThan(1000);
   });
@@ -111,17 +109,16 @@ describe('downloadModels', () => {
   it('keeps going while data keeps arriving, however slowly', async () => {
     const body = bytes(8 * CHUNK);
     const { fetch } = fakeFetch({ 'a.onnx': { body, delayMs: 30 } });
-    const [a] = downloadModels('/models/', [{ file: 'a.onnx', bytes: body.length }], { fetch, idleTimeoutMs: 100, onProgress: noProgress });
+    const [a] = downloadFiles([{ url: '/models/a.onnx', bytes: body.length }], { fetch, idleTimeoutMs: 100, onProgress: noProgress });
     expect(await a).toEqual(body);
   });
 
   it('stops the other downloads when one fails', async () => {
     const { fetch, signals } = fakeFetch({ 'a.onnx': { status: 404 }, 'b.onnx': { stall: true } });
-    const [a, b] = downloadModels(
-      '/models/',
+    const [a, b] = downloadFiles(
       [
-        { file: 'a.onnx', bytes: 10 },
-        { file: 'b.onnx', bytes: 10 },
+        { url: '/models/a.onnx', bytes: 10 },
+        { url: '/models/b.onnx', bytes: 10 },
       ],
       { fetch, idleTimeoutMs: 10_000, onProgress: noProgress },
     );

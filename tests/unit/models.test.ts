@@ -1,6 +1,8 @@
 import * as ort from 'onnxruntime-web/wasm';
+import { statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-import { MODELS } from '../../src/config.ts';
+import { MODELS, ORT_WASM_BYTES } from '../../src/config.ts';
 import { readModel } from '../helpers/models.ts';
 
 ort.env.wasm.numThreads = 1;
@@ -10,6 +12,11 @@ describe('model files', () => {
   it('have the sizes the loading progress bar expects', () => {
     expect(readModel(MODELS.yunet.file).byteLength).toBe(MODELS.yunet.bytes);
     expect(readModel(MODELS.sface.file).byteLength).toBe(MODELS.sface.bytes);
+  });
+
+  it('include the ONNX Runtime wasm, whose size the download checks too', () => {
+    const wasm = createRequire(import.meta.url).resolve('onnxruntime-web/ort-wasm-simd-threaded.wasm');
+    expect(statSync(wasm).size).toBe(ORT_WASM_BYTES);
   });
 
   it('YuNet takes a 320×256 BGR image and returns cls/obj/bbox/kps per stride', async () => {
