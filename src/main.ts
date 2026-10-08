@@ -23,7 +23,15 @@ const storeReady = openStore();
 
 let people: Person[] = [];
 let modelsReady = false;
-let cameraReady = false;
+let booting = false;
+/** The main screen is up. Whether the camera and detection run then follows page visibility. */
+let running = false;
+/** The camera is open, the detection loop runs and the active tab's panel is listening. */
+let active = false;
+/** Bumped by every suspend and resume, so a resume still waiting for the camera knows it is stale. */
+let resumeToken = 0;
+/** After a camera denial, iOS Safari keeps refusing until the page reloads, even once the setting is changed. */
+let retryReloads = false;
 let panels: Record<Tab, ReceptionPanel | EnrollPanel> | undefined;
 let activeTab: Tab | undefined;
 
@@ -36,32 +44,41 @@ async function openStore(): Promise<{ store: PeopleStore; volatile: boolean }> {
   }
 }
 
+function showCameraError(error: unknown): void {
+  const problem = classifyCameraError(error, window.isSecureContext);
+  retryReloads = problem === 'denied';
+  startScreen.showError(cameraProblemMessage(problem), true);
+}
+
 async function boot(): Promise<void> {
+  if (booting) return;
+  booting = true;
   startScreen.showLoading();
   const [camera, models] = await Promise.allSettled([
-    cameraReady ? Promise.resolve() : stage.openCamera(),
+    stage.cameraLive() ? Promise.resolve(true) : stage.openCamera(),
     modelsReady ? Promise.resolve() : client.init((ratio) => startScreen.setProgress(ratio)),
   ]);
-  if (camera.status === 'fulfilled') cameraReady = true;
+  booting = false;
   if (models.status === 'fulfilled') {
     modelsReady = true;
     document.body.dataset.models = 'ready';
   }
   if (models.status === 'rejected') {
     const reason = models.reason instanceof InitError ? models.reason.reason : 'unsupported';
+    retryReloads = false;
     startScreen.showError(initFailureMessage(reason), reason === 'network');
     return;
   }
   if (camera.status === 'rejected') {
-    startScreen.showError(cameraProblemMessage(classifyCameraError(camera.reason, window.isSecureContext)), true);
+    showCameraError(camera.reason);
     return;
   }
   if (!panels) panels = await createPanels();
   startScreen.hide();
   mainScreen.hidden = false;
-  stage.start();
-  if (activeTab) panels[activeTab].activate();
-  else selectTab(people.length === 0 ? 'enroll' : 'reception');
+  running = true;
+  if (!activeTab) selectTab(people.length === 0 ? 'enroll' : 'reception');
+  await resume();
 }
 
 async function createPanels(): Promise<Record<Tab, ReceptionPanel | EnrollPanel>> {
@@ -79,37 +96,49 @@ async function createPanels(): Promise<Record<Tab, ReceptionPanel | EnrollPanel>
 
 function selectTab(tab: Tab): void {
   if (!panels || activeTab === tab) return;
-  if (activeTab) panels[activeTab].deactivate();
+  if (active && activeTab) panels[activeTab].deactivate();
   activeTab = tab;
   mainScreen.dataset.tab = tab;
   for (const t of TABS) {
     tabButtons[t].setAttribute('aria-selected', String(t === tab));
     tabPanels[t].hidden = t !== tab;
   }
-  panels[tab].activate();
+  if (active) panels[tab].activate();
 }
 
-// iOS stops the camera in the background; release it ourselves and reopen when the page comes back.
-document.addEventListener('visibilitychange', () => {
-  if (!panels || !activeTab || mainScreen.hidden) return;
-  if (document.hidden) {
-    panels[activeTab].deactivate();
-    stage.stop();
-    cameraReady = false;
+/** Releases the camera and stops detection, e.g. when the page goes to the background. */
+function suspend(): void {
+  resumeToken++;
+  if (active && panels && activeTab) panels[activeTab].deactivate();
+  active = false;
+  stage.stop();
+}
+
+/** Opens the camera and starts detection again, if the main screen is up and the page is visible. */
+async function resume(): Promise<void> {
+  if (!running || active || document.hidden) return;
+  const token = ++resumeToken;
+  let opened: boolean;
+  try {
+    opened = stage.cameraLive() || (await stage.openCamera());
+  } catch (error) {
+    if (token !== resumeToken) return;
+    running = false;
+    mainScreen.hidden = true;
+    showCameraError(error);
     return;
   }
-  stage.openCamera().then(
-    () => {
-      cameraReady = true;
-      stage.start();
-      if (panels && activeTab) panels[activeTab].activate();
-    },
-    (error: unknown) => {
-      mainScreen.hidden = true;
-      startScreen.showError(cameraProblemMessage(classifyCameraError(error, window.isSecureContext)), true);
-    },
-  );
+  if (!opened || token !== resumeToken || document.hidden) return;
+  active = true;
+  stage.start();
+  if (panels && activeTab) panels[activeTab].activate();
+}
+
+// iOS stops the camera in the background; release it ourselves and reopen it when the page comes back.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) suspend();
+  else void resume();
 });
 
 startScreen.onStart(() => void boot());
-startScreen.onRetry(() => void boot());
+startScreen.onRetry(() => (retryReloads ? location.reload() : void boot()));

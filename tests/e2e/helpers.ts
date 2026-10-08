@@ -26,6 +26,32 @@ export async function launchWithFace(profileDir: string, face: string, outDir: s
   });
 }
 
+/** Fakes the page going to the background (screen lock, app switch) or coming back. */
+export async function setHidden(page: Page, hidden: boolean): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (value ? 'hidden' : 'visible') });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+
+/** Counts DOM mutations under `selector` during `ms` milliseconds. */
+export function countMutations(page: Page, selector: string, ms: number): Promise<number> {
+  return page.evaluate(
+    ([sel, duration]) =>
+      new Promise<number>((resolve) => {
+        let count = 0;
+        const observer = new MutationObserver((records) => (count += records.length));
+        observer.observe(document.querySelector(sel as string)!, { subtree: true, childList: true, characterData: true });
+        setTimeout(() => {
+          observer.disconnect();
+          resolve(count);
+        }, duration as number);
+      }),
+    [selector, ms] as const,
+  );
+}
+
 export async function openApp(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
   await page.goto(APP_URL);

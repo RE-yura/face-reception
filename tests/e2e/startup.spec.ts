@@ -20,6 +20,18 @@ test('explains how to allow the camera when permission is denied', async () => {
   await browser.close();
 });
 
+test('reloads the page on retry after a camera denial, so a changed camera setting takes effect', async () => {
+  const browser = await chromium.launch({ channel: 'chrome', args: ['--use-fake-device-for-media-stream'] });
+  const page = await (await browser.newContext()).newPage();
+  await page.goto(APP_URL);
+  await page.getByRole('button', { name: 'はじめる' }).click();
+  await expect(page.locator('#start-error-message')).toContainText('カメラの使用が許可されていません', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'もう一度試す' }).click();
+  await expect(page.getByRole('button', { name: 'はじめる' })).toBeVisible();
+  await expect(page.locator('#start-error')).toBeHidden();
+  await browser.close();
+});
+
 test('offers a retry when the models fail to download', async ({}, testInfo) => {
   const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
   await context.route('**/models/*.onnx', (route) => route.abort());

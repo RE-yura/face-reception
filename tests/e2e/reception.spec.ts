@@ -1,19 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { launchWithFace, newProfile, openApp } from './helpers.ts';
+import { countMutations, launchWithFace, newProfile, openApp, setHidden } from './helpers.ts';
 
 async function enroll(page: Page, name: string): Promise<void> {
   await page.getByRole('tab', { name: '登録' }).click();
   await page.getByLabel('名前').fill(name);
   await page.getByRole('button', { name: '撮影' }).click();
   await expect(page.locator('#enroll-status')).toHaveText(`${name} さんを登録しました。`, { timeout: 20_000 });
-}
-
-async function setHidden(page: Page, hidden: boolean): Promise<void> {
-  await page.evaluate((value) => {
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => value });
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (value ? 'hidden' : 'visible') });
-    document.dispatchEvent(new Event('visibilitychange'));
-  }, hidden);
 }
 
 test('enrolls a face, recognizes another photo of the same person after a restart, and rejects someone else', async ({}, testInfo) => {
@@ -83,5 +75,29 @@ test('releases the camera while the page is in the background and resumes when i
   expect(await page.locator('#camera').evaluate((video: HTMLVideoElement) => video.srcObject)).toBeNull();
   await setHidden(page, false);
   await expect(page.locator('#stage')).toHaveAttribute('data-face-count', '1');
+  await context.close();
+});
+
+test('announces the reception result once instead of rewriting it on every frame', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'meir-a', testInfo.outputDir);
+  const page = await openApp(context);
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await enroll(page, 'メイア');
+  await page.getByRole('tab', { name: '受付' }).click();
+  await expect(page.locator('#reception-message')).toHaveText('あなたは メイア さんですね?');
+  expect(await countMutations(page, '#reception-message', 1_500)).toBe(0);
+  await context.close();
+});
+
+test('updates the enrollment status only when its text changes', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'meir-a', testInfo.outputDir);
+  const page = await openApp(context);
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await page.getByLabel('名前').fill('メイア');
+  const mutations = countMutations(page, '#enroll-status', 4_000);
+  await page.getByRole('button', { name: '撮影' }).click();
+  await expect(page.locator('#enroll-status')).toHaveText('メイア さんを登録しました。', { timeout: 20_000 });
+  // 0/5 … 4/5, then the result: one update per distinct text
+  expect(await mutations).toBeLessThanOrEqual(8);
   await context.close();
 });

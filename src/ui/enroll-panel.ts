@@ -35,7 +35,7 @@ export class EnrollPanel {
   }
 
   activate(): void {
-    this.status.textContent = '';
+    this.setStatus('');
     this.updateButton();
   }
 
@@ -78,6 +78,11 @@ export class EnrollPanel {
     return item;
   }
 
+  /** #enroll-status is a live region; rewriting it with the same text would make screen readers repeat it. */
+  private setStatus(text: string): void {
+    if (this.status.textContent !== text) this.status.textContent = text;
+  }
+
   private updateButton(): void {
     this.button.disabled = this.cancelCapture !== undefined || this.nameInput.value.trim() === '';
   }
@@ -88,14 +93,15 @@ export class EnrollPanel {
     const handle = (status: EnrollStatus<RgbaImage>) => {
       switch (status.kind) {
         case 'collecting':
-          this.status.textContent =
+          this.setStatus(
             status.hint === 'one-face'
               ? `1人だけ映ってください（${status.count} / ${status.total}）`
-              : `少しずつ顔の向きを変えてください（${status.count} / ${status.total}）`;
+              : `少しずつ顔の向きを変えてください（${status.count} / ${status.total}）`,
+          );
           break;
         case 'timeout':
           stop();
-          this.status.textContent = `時間内に撮影できませんでした（${status.count} / ${status.total}）。もう一度試してください。`;
+          this.setStatus(`時間内に撮影できませんでした（${status.count} / ${status.total}）。もう一度試してください。`);
           break;
         case 'done':
           stop();
@@ -122,9 +128,9 @@ export class EnrollPanel {
     };
     this.cancelCapture = () => {
       stop();
-      this.status.textContent = '撮影を中止しました。';
+      this.setStatus('撮影を中止しました。');
     };
-    this.status.textContent = `少しずつ顔の向きを変えてください（0 / ${ENROLL_SHOTS}）`;
+    this.setStatus(`少しずつ顔の向きを変えてください（0 / ${ENROLL_SHOTS}）`);
     this.stage.requestEmbedding();
     this.updateButton();
   }
@@ -136,10 +142,10 @@ export class EnrollPanel {
       this.onPeopleChanged(await this.store.listPeople());
       this.nameInput.value = '';
       this.updateButton();
-      this.status.textContent = `${name} さんを登録しました。`;
+      this.setStatus(`${name} さんを登録しました。`);
     } catch (error) {
       console.error(error);
-      this.status.textContent = '保存できませんでした。';
+      this.setStatus('保存できませんでした。');
     }
   }
 

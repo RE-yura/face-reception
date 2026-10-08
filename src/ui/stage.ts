@@ -1,4 +1,4 @@
-import { closeCamera, openCamera } from '../camera.ts';
+import { cameraIsLive, closeCamera, openCamera } from '../camera.ts';
 import type { VisionClient } from '../vision-client.ts';
 import { largestFace } from '../vision/detector.ts';
 import type { Analysis } from '../worker-protocol.ts';
@@ -29,8 +29,13 @@ export class Stage {
     this.client = client;
   }
 
-  openCamera(): Promise<void> {
+  /** Resolves false when the page went to the background before the camera opened. */
+  openCamera(): Promise<boolean> {
     return openCamera(this.video);
+  }
+
+  cameraLive(): boolean {
+    return cameraIsLive(this.video);
   }
 
   start(): void {

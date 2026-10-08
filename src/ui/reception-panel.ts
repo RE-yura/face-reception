@@ -15,6 +15,8 @@ export class ReceptionPanel {
   private readonly getPeople: () => Person[];
   private timer: ReturnType<typeof setInterval> | undefined;
   private unsubscribe: (() => void) | undefined;
+  /** What the message currently says, so the live region changes only when that does. */
+  private shown = '';
 
   constructor(stage: Stage, getPeople: () => Person[], onGoEnroll: () => void) {
     this.stage = stage;
@@ -23,7 +25,9 @@ export class ReceptionPanel {
   }
 
   activate(): void {
+    this.deactivate();
     this.state.reset();
+    this.shown = '';
     this.render(this.state.update({ faceCount: 0, peopleCount: this.getPeople().length }));
     this.unsubscribe = this.stage.onAnalysis((analysis) => this.handle(analysis));
     this.stage.requestEmbedding();
@@ -32,7 +36,9 @@ export class ReceptionPanel {
 
   deactivate(): void {
     clearInterval(this.timer);
+    this.timer = undefined;
     this.unsubscribe?.();
+    this.unsubscribe = undefined;
     this.stage.setLabel(null);
   }
 
@@ -43,8 +49,13 @@ export class ReceptionPanel {
   }
 
   private render(view: ReceptionView): void {
+    const score = view.kind === 'matched' || view.kind === 'unknown' ? `類似度 ${view.score.toFixed(2)}` : '';
+    if (this.score.textContent !== score) this.score.textContent = score;
+    // #reception-message is a live region: screen readers announce every change, so touch it only when it changes.
+    const key = view.kind === 'matched' ? `matched:${view.name}` : view.kind;
+    if (key === this.shown) return;
+    this.shown = key;
     this.goEnroll.hidden = view.kind !== 'no-people';
-    this.score.textContent = view.kind === 'matched' || view.kind === 'unknown' ? `類似度 ${view.score.toFixed(2)}` : '';
     switch (view.kind) {
       case 'no-people':
         this.message.textContent = 'まずは登録してください';
