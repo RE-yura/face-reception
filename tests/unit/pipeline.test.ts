@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, MATCH_THRESHOLD, MODELS, NMS_IOU_THRESHOLD } from '../../src/config.ts';
 import { dot } from '../../src/match.ts';
+import { largestFace } from '../../src/vision/detector.ts';
 import { FacePipeline } from '../../src/vision/pipeline.ts';
-import { FACE_NAMES, loadFace, prepareDetectorInput, type FaceName } from '../helpers/images.ts';
+import { composeFaces, FACE_NAMES, loadFace, prepareDetectorInput, type FaceName } from '../helpers/images.ts';
 import { readModel } from '../helpers/models.ts';
 
 interface Reference {
@@ -67,5 +68,36 @@ describe('FacePipeline at the app setting (long side 320)', () => {
     const blank = { width: 640, height: 480, data: new Uint8ClampedArray(640 * 480 * 4) };
     const { input, layout } = prepareDetectorInput(blank, DETECT_INPUT_LONG_SIDE);
     expect(await pipeline.detect(input, layout, opts)).toEqual([]);
+  });
+});
+
+describe('FacePipeline.analyze', () => {
+  it('embeds the largest face, even when a smaller face scores higher', async () => {
+    const frame = composeFaces(640, 480, [
+      { name: 'kim', crop: [350, 80, 340, 420], scale: 1, at: [0, 20] },
+      { name: 'meir-a', crop: [330, 80, 340, 420], scale: 0.7, at: [400, 100] },
+    ]);
+    const { input, layout } = prepareDetectorInput(frame, DETECT_INPUT_LONG_SIDE);
+    const { faces, largest } = await pipeline.analyze(input, layout, opts, () => frame);
+    expect(faces).toHaveLength(2);
+    // Faces come sorted by score, and here the small face scores higher: embedding faces[0] would pick the wrong person.
+    expect(largestFace(faces)).not.toBe(faces[0]);
+    expect(dot(largest!.embedding, reference.kim.embedding)).toBeGreaterThanOrEqual(MATCH_THRESHOLD);
+    expect(dot(largest!.embedding, reference['meir-a'].embedding)).toBeLessThan(MATCH_THRESHOLD);
+    expect([largest!.aligned.width, largest!.aligned.height]).toEqual([112, 112]);
+  });
+
+  it('only detects when no frame is given for embedding', async () => {
+    const frame = loadFace('kim');
+    const { input, layout } = prepareDetectorInput(frame, DETECT_INPUT_LONG_SIDE);
+    const result = await pipeline.analyze(input, layout, opts, undefined);
+    expect(result.faces).toHaveLength(1);
+    expect(result.largest).toBeUndefined();
+  });
+
+  it('returns no embedding when there is no face', async () => {
+    const blank = { width: 640, height: 480, data: new Uint8ClampedArray(640 * 480 * 4) };
+    const { input, layout } = prepareDetectorInput(blank, DETECT_INPUT_LONG_SIDE);
+    expect(await pipeline.analyze(input, layout, opts, () => blank)).toEqual({ faces: [] });
   });
 });

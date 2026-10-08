@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, MODELS, NMS_IOU_THRESHOLD } from './config.ts';
-import { detectorLayout, largestFace } from './vision/detector.ts';
+import { detectorLayout } from './vision/detector.ts';
 import { FacePipeline } from './vision/pipeline.ts';
 import type { Analysis, WorkerRequest, WorkerResponse } from './worker-protocol.ts';
 
@@ -90,24 +90,20 @@ async function analyze(frame: ImageBitmap, embed: boolean): Promise<{ analysis: 
     const { width, height } = frame;
     const layout = detectorLayout(width, height, DETECT_INPUT_LONG_SIDE);
     inputCanvas = sized(inputCanvas, layout.width, layout.height);
-    const input = context2d(inputCanvas);
-    input.clearRect(0, 0, layout.width, layout.height);
-    input.drawImage(frame, 0, 0, width * layout.scale, height * layout.scale);
-    const faces = await pipeline.detect(input.getImageData(0, 0, layout.width, layout.height), layout, {
-      scoreThreshold: DETECT_SCORE_THRESHOLD,
-      iouThreshold: NMS_IOU_THRESHOLD,
-    });
-    const analysis: Analysis = { faces, frameWidth: width, frameHeight: height };
-    const transfer: Transferable[] = [];
-    const largest = largestFace(faces);
-    if (embed && largest) {
+    const inputContext = context2d(inputCanvas);
+    inputContext.clearRect(0, 0, layout.width, layout.height);
+    inputContext.drawImage(frame, 0, 0, width * layout.scale, height * layout.scale);
+    const opts = { scoreThreshold: DETECT_SCORE_THRESHOLD, iouThreshold: NMS_IOU_THRESHOLD };
+    const fullFrame = () => {
       frameCanvas = sized(frameCanvas, width, height);
       const full = context2d(frameCanvas);
       full.drawImage(frame, 0, 0);
-      const { embedding, aligned } = await pipeline.embed(full.getImageData(0, 0, width, height), largest);
-      analysis.largest = { embedding, aligned };
-      transfer.push(embedding.buffer as ArrayBuffer, aligned.data.buffer as ArrayBuffer);
-    }
+      return full.getImageData(0, 0, width, height);
+    };
+    const input = inputContext.getImageData(0, 0, layout.width, layout.height);
+    const { faces, largest } = await pipeline.analyze(input, layout, opts, embed ? fullFrame : undefined);
+    const analysis: Analysis = { faces, largest, frameWidth: width, frameHeight: height };
+    const transfer: Transferable[] = largest ? [largest.embedding.buffer as ArrayBuffer, largest.aligned.data.buffer as ArrayBuffer] : [];
     return { analysis, transfer };
   } finally {
     frame.close();
