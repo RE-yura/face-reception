@@ -1,6 +1,7 @@
 import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
-import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, MODELS, NMS_IOU_THRESHOLD } from './config.ts';
+import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, DOWNLOAD_IDLE_TIMEOUT_MS, MODELS, NMS_IOU_THRESHOLD } from './config.ts';
+import { downloadModels } from './model-download.ts';
 import { detectorLayout } from './vision/detector.ts';
 import { FacePipeline } from './vision/pipeline.ts';
 import type { Analysis, WorkerRequest, WorkerResponse } from './worker-protocol.ts';
@@ -18,32 +19,6 @@ function send(message: WorkerResponse, transfer: Transferable[] = []): void {
   self.postMessage(message, { transfer });
 }
 
-async function fetchModels(baseUrl: string): Promise<[Uint8Array, Uint8Array]> {
-  const total = MODELS.yunet.bytes + MODELS.sface.bytes;
-  let loaded = 0;
-  const fetchOne = async (file: string): Promise<Uint8Array> => {
-    const res = await fetch(`${baseUrl}${file}`);
-    if (!res.ok || !res.body) throw new Error(`${file}: HTTP ${res.status}`);
-    const chunks: Uint8Array[] = [];
-    const reader = res.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      loaded += value.byteLength;
-      send({ type: 'progress', loaded: Math.min(loaded, total), total });
-    }
-    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.byteLength, 0));
-    let offset = 0;
-    for (const c of chunks) {
-      bytes.set(c, offset);
-      offset += c.byteLength;
-    }
-    return bytes;
-  };
-  return Promise.all([fetchOne(MODELS.yunet.file), fetchOne(MODELS.sface.file)]);
-}
-
 async function init(modelBaseUrl: string): Promise<void> {
   if (pipeline) {
     send({ type: 'ready' });
@@ -53,9 +28,14 @@ async function init(modelBaseUrl: string): Promise<void> {
     send({ type: 'init-error', reason: 'unsupported', message: 'OffscreenCanvas is unavailable' });
     return;
   }
-  let models: [Uint8Array, Uint8Array];
+  let models: Uint8Array[];
   try {
-    models = await fetchModels(modelBaseUrl);
+    models = await Promise.all(
+      downloadModels(modelBaseUrl, [MODELS.yunet, MODELS.sface], {
+        onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
+        idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS,
+      }),
+    );
   } catch (error) {
     send({ type: 'init-error', reason: 'network', message: String(error) });
     return;

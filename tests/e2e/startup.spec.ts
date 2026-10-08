@@ -42,3 +42,17 @@ test('offers a retry when the models fail to download', async ({}, testInfo) => 
   await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
   await context.close();
 });
+
+test('offers a retry when a model download returns something other than the model, such as a Wi-Fi login page', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  const sface = '**/models/face_recognition_sface_2021dec.onnx';
+  await context.route(sface, (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Wi-Fi login</title>' }),
+  );
+  const page = await openApp(context);
+  await expect(page.locator('#start-error-message')).toContainText('モデルの読み込みに失敗しました', { timeout: 60_000 });
+  await context.unroute(sface);
+  await page.getByRole('button', { name: 'もう一度試す' }).click();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});

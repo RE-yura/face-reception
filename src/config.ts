@@ -11,3 +11,6 @@ export const MODELS = {
   yunet: { file: 'face_detection_yunet_2026may.onnx', bytes: 229_738 },
   sface: { file: 'face_recognition_sface_2021dec.onnx', bytes: 38_696_353 },
 } as const;
+
+/** A model download gives up when no data arrives for this long. */
+export const DOWNLOAD_IDLE_TIMEOUT_MS = 20_000;
