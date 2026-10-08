@@ -1,0 +1,242 @@
+/* ロビー — ホテルの受付カウンター。深緑のフェルトと真鍮、見出しは明朝 */
+:root {
+  --bg: #f3f4ef;
+  --fg: #1d2b27;
+  --muted: #5b6862;
+  --line: #d3d8cf;
+  --surface: #ffffff;
+  --green: #1f4a3f;
+  --green-dark: #163830;
+  --brass: #c1923a;
+  --danger: #a3372b;
+  --box: rgba(255, 255, 255, 0.85);
+  --box-accent: #c1923a;
+  --label-fg: #1d2b27;
+  --label-font: bold 16px 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+  --font-display: 'Zen Old Mincho', 'Hiragino Mincho ProN', serif;
+  --font-body: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 2.25rem;
+  letter-spacing: 0.08em;
+  color: var(--green);
+}
+
+.title::after {
+  content: '';
+  display: block;
+  width: 48px;
+  height: 2px;
+  margin: 14px auto 0;
+  background: var(--brass);
+}
+
+.lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.button {
+  min-height: 44px;
+  padding: 10px 20px;
+  border: 1px solid var(--green);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--green);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.button-primary {
+  background: var(--green);
+  color: #fff;
+}
+
+.button-primary:active {
+  background: var(--green-dark);
+}
+
+.button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button:disabled {
+  border-color: var(--line);
+  background: var(--line);
+  color: var(--muted);
+  cursor: default;
+}
+
+.button:focus-visible,
+.tab:focus-visible,
+.enroll-name:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+.load-progress {
+  appearance: none;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.load-progress::-webkit-progress-bar {
+  background: var(--line);
+}
+
+.load-progress::-webkit-progress-value {
+  background: var(--green);
+}
+
+.load-progress::-moz-progress-bar {
+  background: var(--green);
+}
+
+.load-message {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.start-error {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+}
+
+.start-error-message {
+  margin: 0;
+  color: var(--danger);
+}
+
+.tabs {
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  min-height: 48px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+}
+
+.tab[aria-selected='true'] {
+  border-bottom-color: var(--green);
+  color: var(--green);
+}
+
+.panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  background: var(--bg);
+}
+
+.panel-reception {
+  justify-items: center;
+  text-align: center;
+}
+
+.reception-message {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.reception-name {
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  color: var(--green);
+  border-bottom: 2px solid var(--brass);
+}
+
+.reception-score,
+.person-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.enroll-label,
+.people-heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.enroll-name {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  font-family: inherit;
+}
+
+.enroll-status,
+.volatile-note,
+.people-empty {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.volatile-note,
+.people-empty {
+  color: var(--muted);
+}
+
+.people-heading {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.person + .person {
+  border-top: 1px solid var(--line);
+}
+
+.person-thumb {
+  border-radius: 50%;
+  border: 2px solid var(--brass);
+}
+
+.person-name {
+  font-weight: 700;
+}
+
+.person-delete {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+}
