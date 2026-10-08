@@ -27,7 +27,8 @@ export class StartScreen {
 
   setProgress(ratio: number): void {
     this.progress.value = ratio;
-    this.message.textContent = `モデルを読み込んでいます… ${Math.floor(ratio * 100)}%`;
+    // After the download, the inference engine may still be loading and compiling.
+    this.message.textContent = ratio < 1 ? `モデルを読み込んでいます… ${Math.floor(ratio * 100)}%` : '準備しています…';
   }
 
   showError(message: string, canRetry: boolean): void {

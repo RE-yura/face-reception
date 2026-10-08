@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web/wasm';
 import wasmUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, DOWNLOAD_IDLE_TIMEOUT_MS, MODELS, NMS_IOU_THRESHOLD } from './config.ts';
-import { downloadModels } from './model-download.ts';
+import { DownloadError, downloadModels } from './model-download.ts';
 import { detectorLayout } from './vision/detector.ts';
 import { FacePipeline } from './vision/pipeline.ts';
 import type { Analysis, WorkerRequest, WorkerResponse } from './worker-protocol.ts';
@@ -28,22 +28,14 @@ async function init(modelBaseUrl: string): Promise<void> {
     send({ type: 'init-error', reason: 'unsupported', message: 'OffscreenCanvas is unavailable' });
     return;
   }
-  let models: Uint8Array[];
+  const [yunet, sface] = downloadModels(modelBaseUrl, [MODELS.yunet, MODELS.sface], {
+    onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
+    idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS,
+  });
   try {
-    models = await Promise.all(
-      downloadModels(modelBaseUrl, [MODELS.yunet, MODELS.sface], {
-        onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
-        idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS,
-      }),
-    );
+    pipeline = await FacePipeline.create(yunet, sface);
   } catch (error) {
-    send({ type: 'init-error', reason: 'network', message: String(error) });
-    return;
-  }
-  try {
-    pipeline = await FacePipeline.create(models[0], models[1]);
-  } catch (error) {
-    send({ type: 'init-error', reason: 'unsupported', message: String(error) });
+    send({ type: 'init-error', reason: error instanceof DownloadError ? 'network' : 'unsupported', message: String(error) });
     return;
   }
   send({ type: 'ready' });

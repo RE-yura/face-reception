@@ -25,11 +25,24 @@ export class FacePipeline {
     this.sface = sface;
   }
 
-  static async create(yunetModel: Uint8Array, sfaceModel: Uint8Array): Promise<FacePipeline> {
+  /**
+   * Accepts models still downloading: the YuNet session (whose creation also loads the ONNX Runtime wasm) starts as
+   * soon as the small YuNet model arrives, while the large SFace model is still on its way. A failed download
+   * rejects with that download's error.
+   */
+  static async create(yunetModel: Uint8Array | Promise<Uint8Array>, sfaceModel: Uint8Array | Promise<Uint8Array>): Promise<FacePipeline> {
     const opts: ort.InferenceSession.SessionOptions = { executionProviders: ['wasm'], logSeverityLevel: 3 };
-    const yunet = await ort.InferenceSession.create(yunetModel, opts);
-    const sface = await ort.InferenceSession.create(sfaceModel, opts);
-    return new FacePipeline(yunet, sface);
+    const sfaceBytes = Promise.resolve(sfaceModel);
+    // Reported by the await below, unless the YuNet step fails first.
+    sfaceBytes.catch(() => {});
+    const yunet = await ort.InferenceSession.create(await yunetModel, opts);
+    try {
+      const sface = await ort.InferenceSession.create(await sfaceBytes, opts);
+      return new FacePipeline(yunet, sface);
+    } catch (error) {
+      await yunet.release();
+      throw error;
+    }
   }
 
   /** `input` is the frame already resized and padded to layout.width × layout.height. Returns faces in frame coordinates. */

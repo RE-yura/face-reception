@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, MATCH_THRESHOLD, MODELS, NMS_IOU_THRESHOLD } from '../../src/config.ts';
 import { dot } from '../../src/match.ts';
+import { DownloadError } from '../../src/model-download.ts';
 import { largestFace } from '../../src/vision/detector.ts';
 import { FacePipeline } from '../../src/vision/pipeline.ts';
 import { composeFaces, FACE_NAMES, loadFace, prepareDetectorInput, type FaceName } from '../helpers/images.ts';
@@ -99,5 +100,23 @@ describe('FacePipeline.analyze', () => {
     const blank = { width: 640, height: 480, data: new Uint8ClampedArray(640 * 480 * 4) };
     const { input, layout } = prepareDetectorInput(blank, DETECT_INPUT_LONG_SIDE);
     expect(await pipeline.analyze(input, layout, opts, () => blank)).toEqual({ faces: [] });
+  });
+});
+
+describe('FacePipeline.create', () => {
+  it('takes models that are still downloading, and passes on a download failure as it is', async () => {
+    const failure = new DownloadError('connection lost');
+    const created = FacePipeline.create(Promise.resolve(readModel(MODELS.yunet.file)), Promise.reject(failure));
+    await expect(created).rejects.toBe(failure);
+  });
+
+  it('creates a working pipeline from models given as promises', async () => {
+    const created = await FacePipeline.create(
+      Promise.resolve(readModel(MODELS.yunet.file)),
+      Promise.resolve(readModel(MODELS.sface.file)),
+    );
+    const frame = loadFace('kim');
+    const { input, layout } = prepareDetectorInput(frame, DETECT_INPUT_LONG_SIDE);
+    expect((await created.analyze(input, layout, opts, () => frame)).largest?.embedding).toHaveLength(128);
   });
 });

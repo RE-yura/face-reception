@@ -1,4 +1,4 @@
-import { chromium, expect, test } from '@playwright/test';
+import { chromium, expect, test, type BrowserContext } from '@playwright/test';
 import { APP_URL, launchWithFace, newProfile, openApp } from './helpers.ts';
 
 test('loads the models and draws a box around the face the camera sees', async ({}, testInfo) => {
@@ -53,6 +53,43 @@ test('offers a retry when a model download returns something other than the mode
   await expect(page.locator('#start-error-message')).toContainText('モデルの読み込みに失敗しました', { timeout: 60_000 });
   await context.unroute(sface);
   await page.getByRole('button', { name: 'もう一度試す' }).click();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});
+
+/** Holds every request matching `pattern` until the returned function is called. */
+async function holdRequests(context: BrowserContext, pattern: string): Promise<{ requested: () => boolean; release: () => void }> {
+  let requested = false;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await context.route(pattern, async (route) => {
+    requested = true;
+    await gate;
+    await route.continue();
+  });
+  return { requested: () => requested, release };
+}
+
+test('starts loading the inference engine while the large model is still downloading', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  const sface = await holdRequests(context, '**/models/face_recognition_sface_2021dec.onnx');
+  const wasm = await holdRequests(context, '**/*.wasm');
+  wasm.release();
+  const page = await openApp(context);
+  await expect.poll(sface.requested).toBe(true);
+  await expect.poll(wasm.requested, { timeout: 15_000 }).toBe(true);
+  sface.release();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});
+
+test('says it is getting ready, not stuck at 100%, while the inference engine loads after the models', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  const wasm = await holdRequests(context, '**/*.wasm');
+  const page = await openApp(context);
+  await expect(page.locator('#load-progress')).toHaveJSProperty('value', 1, { timeout: 60_000 });
+  await expect(page.locator('#load-message')).toHaveText('準備しています…');
+  wasm.release();
   await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
   await context.close();
 });
