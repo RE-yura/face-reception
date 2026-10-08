@@ -31,13 +31,14 @@ export class StartScreen {
     this.message.textContent = ratio < 1 ? `モデルを読み込んでいます… ${Math.floor(ratio * 100)}%` : '準備しています…';
   }
 
-  showError(message: string, canRetry: boolean): void {
+  showError(message: string, canRetry: boolean, retryLabel = 'もう一度試す'): void {
     this.root.hidden = false;
     this.startButton.hidden = true;
     this.status.hidden = true;
     this.error.hidden = false;
     this.errorMessage.textContent = message;
     this.retryButton.hidden = !canRetry;
+    this.retryButton.textContent = retryLabel;
   }
 
   hide(): void {

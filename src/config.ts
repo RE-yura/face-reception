@@ -14,3 +14,8 @@ export const MODELS = {
 
 /** A model download gives up when no data arrives for this long. */
 export const DOWNLOAD_IDLE_TIMEOUT_MS = 20_000;
+
+/** An analysis the worker has not answered within this long counts as stalled. */
+export const ANALYZE_TIMEOUT_MS = 5_000;
+/** Detection stops after this many failed analyses in a row. */
+export const ANALYZE_MAX_FAILURES = 5;

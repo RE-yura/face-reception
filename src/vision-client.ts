@@ -1,3 +1,4 @@
+import { ANALYZE_TIMEOUT_MS } from './config.ts';
 import type { Analysis, InitFailure, WorkerRequest, WorkerResponse } from './worker-protocol.ts';
 
 export class InitError extends Error {
@@ -9,9 +10,20 @@ export class InitError extends Error {
   }
 }
 
+/** The worker stopped answering, or crashed after start-up. Reloading the page is the way out. */
+export class AnalysisStalled extends Error {}
+
+/** The part of a Worker the client uses, so tests can stand in for it. */
+export interface WorkerPort {
+  postMessage(message: WorkerRequest, transfer: Transferable[]): void;
+  onmessage: ((event: MessageEvent<WorkerResponse>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+}
+
 interface Pending {
   resolve: (analysis: Analysis) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 interface InitWaiter {
@@ -22,20 +34,25 @@ interface InitWaiter {
 
 /** Main-thread handle to the inference worker. */
 export class VisionClient {
-  private readonly worker: Worker;
+  private readonly worker: WorkerPort;
+  private readonly analyzeTimeoutMs: number;
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private initWaiter: InitWaiter | undefined;
 
-  constructor() {
-    this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-    this.worker.onmessage = (event: MessageEvent<WorkerResponse>) => this.handle(event.data);
+  constructor(
+    worker: WorkerPort = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }),
+    analyzeTimeoutMs = ANALYZE_TIMEOUT_MS,
+  ) {
+    this.worker = worker;
+    this.analyzeTimeoutMs = analyzeTimeoutMs;
+    this.worker.onmessage = (event) => this.handle(event.data);
     this.worker.onerror = (event) => {
-      const error = new InitError('unsupported', event.message || 'worker failed');
-      this.initWaiter?.reject(error);
+      const message = event.message || 'worker failed';
+      // A worker that cannot even start means an unsupported browser; a crash later is a stall.
+      this.initWaiter?.reject(new InitError('unsupported', message));
       this.initWaiter = undefined;
-      for (const p of this.pending.values()) p.reject(error);
-      this.pending.clear();
+      for (const id of [...this.pending.keys()]) this.settle(id)?.reject(new AnalysisStalled(message));
     };
   }
 
@@ -51,13 +68,26 @@ export class VisionClient {
   analyze(frame: ImageBitmap, embed: boolean): Promise<Analysis> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(
+        () => this.settle(id)?.reject(new AnalysisStalled(`no answer in ${this.analyzeTimeoutMs} ms`)),
+        this.analyzeTimeoutMs,
+      );
+      this.pending.set(id, { resolve, reject, timer });
       this.post({ type: 'analyze', id, frame, embed }, [frame]);
     });
   }
 
   private post(message: WorkerRequest, transfer: Transferable[] = []): void {
     this.worker.postMessage(message, transfer);
+  }
+
+  /** Removes a pending request and returns it, or undefined when it was already answered or gave up. */
+  private settle(id: number): Pending | undefined {
+    const p = this.pending.get(id);
+    if (!p) return undefined;
+    clearTimeout(p.timer);
+    this.pending.delete(id);
+    return p;
   }
 
   private handle(message: WorkerResponse): void {
@@ -74,12 +104,10 @@ export class VisionClient {
         this.initWaiter = undefined;
         break;
       case 'analysis':
-        this.pending.get(message.id)?.resolve(message.analysis);
-        this.pending.delete(message.id);
+        this.settle(message.id)?.resolve(message.analysis);
         break;
       case 'analyze-error':
-        this.pending.get(message.id)?.reject(new Error(message.message));
-        this.pending.delete(message.id);
+        this.settle(message.id)?.reject(new Error(message.message));
         break;
     }
   }

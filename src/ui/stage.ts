@@ -1,4 +1,6 @@
+import { AnalysisHealth } from '../analysis-health.ts';
 import { cameraIsLive, closeCamera, openCamera } from '../camera.ts';
+import { ANALYZE_MAX_FAILURES } from '../config.ts';
 import type { VisionClient } from '../vision-client.ts';
 import { largestFace } from '../vision/detector.ts';
 import type { Analysis } from '../worker-protocol.ts';
@@ -21,6 +23,8 @@ export class Stage {
   private embedRequested = false;
   private label: string | null = null;
   private last: Analysis | null = null;
+  private health = new AnalysisHealth(ANALYZE_MAX_FAILURES);
+  private fatalHandler: (() => void) | undefined;
 
   constructor(root: HTMLElement, video: HTMLVideoElement, overlay: HTMLCanvasElement, client: VisionClient) {
     this.root = root;
@@ -41,6 +45,7 @@ export class Stage {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.health = new AnalysisHealth(ANALYZE_MAX_FAILURES);
     void this.loop(++this.generation);
   }
 
@@ -70,6 +75,11 @@ export class Stage {
     return () => this.listeners.delete(listener);
   }
 
+  /** Called after the stage stopped because the worker stalled or kept failing. */
+  onFatal(handler: () => void): void {
+    this.fatalHandler = handler;
+  }
+
   private async loop(generation: number): Promise<void> {
     while (generation === this.generation) {
       if (this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || this.video.videoWidth === 0) {
@@ -81,12 +91,19 @@ export class Stage {
       try {
         const analysis = await this.client.analyze(await createImageBitmap(this.video), embed);
         if (generation !== this.generation) break;
+        this.health.succeeded();
         this.last = analysis;
         this.root.dataset.faceCount = String(analysis.faces.length);
         this.draw();
         for (const listener of this.listeners) listener(analysis);
       } catch (error) {
+        if (generation !== this.generation) break;
         console.error(error);
+        if (this.health.failed(error)) {
+          this.stop();
+          this.fatalHandler?.();
+          break;
+        }
         if (embed) this.embedRequested = true;
         await sleep(200);
       }

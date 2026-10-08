@@ -1,6 +1,6 @@
 import './layout.css';
 import './theme.css';
-import { cameraProblemMessage, classifyCameraError, initFailureMessage } from './errors.ts';
+import { ANALYSIS_STALLED_MESSAGE, cameraProblemMessage, classifyCameraError, initFailureMessage } from './errors.ts';
 import { createMemoryPeopleStore, openPeopleStore, type PeopleStore, type Person } from './store.ts';
 import { byId } from './ui/dom.ts';
 import { EnrollPanel } from './ui/enroll-panel.ts';
@@ -133,6 +133,17 @@ async function resume(): Promise<void> {
   stage.start();
   if (panels && activeTab) panels[activeTab].activate();
 }
+
+/** The worker stopped answering: the camera and detection are off, and only a reload starts them again. */
+function showStalled(): void {
+  suspend();
+  running = false;
+  mainScreen.hidden = true;
+  retryReloads = true;
+  startScreen.showError(ANALYSIS_STALLED_MESSAGE, true, 'ページを再読み込み');
+}
+
+stage.onFatal(showStalled);
 
 // iOS stops the camera in the background; release it ourselves and reopen it when the page comes back.
 document.addEventListener('visibilitychange', () => {

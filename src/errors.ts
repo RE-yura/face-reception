@@ -28,3 +28,5 @@ export function initFailureMessage(reason: InitFailure): string {
     ? 'モデルの読み込みに失敗しました。通信環境を確認して、もう一度試してください。'
     : 'このブラウザには対応していません。最新の Safari か Chrome で開いてください。';
 }
+
+export const ANALYSIS_STALLED_MESSAGE = '顔の処理が止まってしまいました。ページを再読み込みしてください。';

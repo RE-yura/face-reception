@@ -97,3 +97,28 @@ test('keeps the camera off when the page is hidden again before the camera opens
   await expectReceptionIdleOnEnrollTab(page);
   await context.close();
 });
+
+test('asks for a reload when face processing stops answering', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  // Lets the test make the worker look stuck by dropping its analyze requests.
+  await context.addInitScript(() => {
+    const w = window as unknown as { __dropAnalyze: boolean };
+    w.__dropAnalyze = false;
+    const original = Worker.prototype.postMessage as (this: Worker, message: unknown, transfer: Transferable[]) => void;
+    Worker.prototype.postMessage = function (this: Worker, message: unknown, transfer?: Transferable[]) {
+      if (w.__dropAnalyze && (message as { type?: string }).type === 'analyze') return;
+      original.call(this, message, transfer ?? []);
+    } as typeof Worker.prototype.postMessage;
+  });
+  const page = await openApp(context);
+  await expect(page.locator('#stage')).toHaveAttribute('data-face-count', '1', { timeout: 60_000 });
+  await page.evaluate(() => ((window as unknown as { __dropAnalyze: boolean }).__dropAnalyze = true));
+  await expect(page.locator('#start-error-message')).toHaveText('顔の処理が止まってしまいました。ページを再読み込みしてください。', {
+    timeout: 15_000,
+  });
+  await expect(page.locator('#main-screen')).toBeHidden();
+  expect(await page.locator('#camera').evaluate((video: HTMLVideoElement) => video.srcObject)).toBeNull();
+  await page.getByRole('button', { name: 'ページを再読み込み' }).click();
+  await expect(page.getByRole('button', { name: 'はじめる' })).toBeVisible();
+  await context.close();
+});
