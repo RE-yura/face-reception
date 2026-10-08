@@ -1,0 +1,207 @@
+# face-reception 設計
+
+日付: 2026-10-08
+元にしたもの: [RE-yura/attendance_manager](https://github.com/RE-yura/attendance_manager)（2020年、PyQt5 + PyTorch の顔認証デモ）
+
+## 1. 目的と成功基準
+
+**目的**: attendance_manager を、ブラウザだけで動く「気軽に遊べる顔認証デモ」として作り直す。推論は ONNX Runtime Web（wasm）を使い、端末内で完結させる。
+
+**成功基準**
+- iPhone の Safari でページを開いてカメラを許可すれば、1〜2分で「登録 → 受付で名前が当たる」まで体験できる。
+- 登録していない人が映ったときに、別人と判定せずに「登録されていません」と返せる。
+- 顔の画像や特徴量は端末の外に一切送らない。
+
+**元アプリとの違い**
+| | 元アプリ | 新アプリ |
+|---|---|---|
+| 実行環境 | PyQt5 のデスクトップアプリ | 静的 Web アプリ（GitHub Pages） |
+| 顔検出 | Haar Cascade | YuNet（ONNX） |
+| 識別 | 登録者で 30×30 の CNN をその場で学習 | 学習済み SFace の特徴量で照合（学習なし） |
+| 登録 | 100枚撮影 → 学習（数十秒〜） | 5枚撮影で即完了 |
+| 未登録者 | 誰かに当てはめてしまう | 「登録されていません」と返す |
+| 判定に必要な人数 | 2人以上 | 1人から |
+
+**扱わないこと**
+- 勤怠記録の保存、一覧、CSV 出力
+- 端末間でのデータ共有、サーバー側の処理
+- なりすまし対策（写真をかざすと通ってしまう。デモなので既知の制約として README に書く）
+- ブラウザ内での学習
+- WebGPU（iOS Safari 26 で ORT の GPU 対応版がメモリを食い潰す既知バグがあるため）
+
+## 2. 技術選定
+
+| 項目 | 選定 | 理由 |
+|---|---|---|
+| ビルド | Vite + TypeScript | 型とテスト基盤を持たせる |
+| 推論ランタイム | `onnxruntime-web@1.30.0` の wasm 専用版（`onnxruntime-web/wasm`） | GPU 対応版は iOS Safari でメモリが膨らみタブが落ちる（onnxruntime #26827 / WebKit 304810） |
+| 顔検出モデル | OpenCV Zoo YuNet `face_detection_yunet_2026may.onnx`（MIT、230KB） | 任意の入力サイズ（32の倍数）を受け付け、5点のランドマークを返す |
+| 特徴量モデル | OpenCV Zoo SFace `face_recognition_sface_2021dec.onnx` fp32（Apache-2.0、38.7MB） | 許諾が緩い。int8 版（9.9MB）は wasm で約3倍遅いので使わない |
+| 保存 | IndexedDB（ラッパーに `idb`） | 再読み込み後も登録が残る |
+| テスト | Vitest、`fake-indexeddb` | |
+| 配信 | GitHub Actions → GitHub Pages（`actions/deploy-pages`） | |
+
+**事前に確認したこと**: 両モデルとも Node 24 上の onnxruntime-web 1.30.0（wasm、1スレッド）で動くことを確認済み。所要時間は YuNet が 320×320 で約11ms、SFace が約63ms（Apple Silicon）。ブラウザと iPhone 実機ではまだ確かめていない。
+
+**配置上の注意**
+- 配布元のモデルは Git LFS で管理されていて、GitHub Pages からは配信できない。そのため、ダウンロードしたファイルを `public/models/` に普通のファイルとしてコミットする（LFS は使わない）。38.7MB は GitHub の 100MB 上限より小さい。
+- GitHub Pages では COOP/COEP ヘッダーを付けられないので、ORT は自動で1スレッドに落ちる。それで問題ない。`ort.env.wasm.numThreads = 1` を明示して警告を出さないようにする。
+- ORT の `.wasm` / `.mjs` は CDN から取らず、ビルド成果物に同梱して同じオリジンから配信する。`ort.env.wasm.wasmPaths` でその場所を指す。
+
+## 3. 全体構成
+
+```
+カメラ映像 ──(1コマ: ImageBitmap)──▶ Worker
+                                      ├─ detector: YuNet で顔検出 → 枠 + 5点 + スコア
+                                      ├─ align:    5点を基準位置に合わせて 112×112 に切り出し
+                                      └─ embedder: SFace → 128次元（長さ1に正規化）
+メインスレッド ◀──(枠 / 特徴量)────────┘
+  ├─ 映像に顔の枠を重ねて描く
+  ├─ match: 登録者と照合
+  └─ store: IndexedDB に保存
+```
+
+推論は専用の Web Worker で動かす。メインスレッドは映像の表示と UI だけを担当する。
+
+**Worker とのやり取り**
+- `init()`: 2つのモデルを読み込んで ORT セッションを作る。読み込みの進み具合をイベントで知らせる。
+- `analyze(frame: ImageBitmap, { embed: boolean })`:
+  - 戻り値は `{ faces: Face[]; largest?: { embedding: Float32Array; aligned: ImageData } }`。
+  - `frame` は Worker に譲渡し、Worker 内の `OffscreenCanvas` で画素を取り出す。
+  - `embed: true` のときだけ、一番大きい顔について揃え処理と SFace を実行する。検出と特徴量抽出を同じコマで1往復で済ませるため、この形にする。
+- `aligned`（112×112 の揃えた顔）は、登録時にメイン側で JPEG に変換してサムネイルにする。
+
+**対応ブラウザ**: iOS 17 以降の Safari、最新の Chrome / Safari / Firefox（デスクトップ）。Worker 内の `OffscreenCanvas` 2D と wasm SIMD が使えることが前提。
+
+### ファイルと役割
+
+| ファイル | 役割 | 依存 |
+|---|---|---|
+| `src/camera.ts` | インカメラの起動・停止、`ImageBitmap` の切り出し | ブラウザ API |
+| `src/vision/detector.ts` | YuNet 用の入力作り（BGR、0〜255、NCHW）、出力の復元（stride 8/16/32）、重複除去（NMS） | なし（純粋関数） |
+| `src/vision/align.ts` | 5点を ArcFace の基準座標に合わせる相似変換（Umeyama）、バイリニア補間で 112×112 に切り出す | なし（純粋関数） |
+| `src/vision/embedder.ts` | SFace 用の入力作り（RGB、0〜255）、出力の正規化 | なし（純粋関数） |
+| `src/worker.ts` | ORT セッションの読み込みと保持。`init` / `analyze` の要求に応える | onnxruntime-web、上の3つ |
+| `src/vision-client.ts` | Worker との通信を Promise で包む（メイン側の窓口） | worker.ts |
+| `src/match.ts` | コサイン類似度で一番近い登録者を探す | なし（純粋関数） |
+| `src/store.ts` | 登録者の追加・取得・削除 | idb |
+| `src/config.ts` | しきい値などの定数を一か所にまとめる | なし |
+| `src/ui/*.ts` | 画面（読み込み、受付、登録） | 上記すべて |
+
+### 前処理と後処理の詳細
+
+**YuNet（顔検出）**
+- 入力: 映像を長辺 320px に縮小し、縦横を32の倍数まで右下に余白を足す。BGR の順、0〜255 の float32、NCHW。
+- 出力の復元: stride 8/16/32 ごとに、スコア = √(cls × obj)、中心 = (列 + dx) × stride、幅・高さ = exp(w) × stride。5点も同様に復元する。
+- スコアが `DETECT_SCORE_THRESHOLD`（0.8）以上の候補に、IoU `NMS_IOU_THRESHOLD`（0.3）で NMS をかける。
+- 座標は元の映像の座標系に戻して返す。
+
+**揃え処理**
+- YuNet の5点（右目、左目、鼻、右口角、左口角）を、ArcFace の基準座標 (38.2946, 51.6963), (73.5318, 51.5014), (56.0252, 71.7366), (41.5493, 92.3655), (70.7299, 92.2041) に合わせる相似変換を Umeyama 法で求める。
+- その逆変換で元の画像からバイリニア補間でサンプリングし、112×112 の RGB を作る（OpenCV の `alignCrop` と同じ処理）。
+
+**SFace（特徴量）**
+- 入力: 112×112、RGB、0〜255 の float32、NCHW（(x−127.5)/128 の正規化はモデル側に入っている）。
+- 出力: 128次元。長さ1に正規化して返す。
+
+## 4. 画面と操作の流れ
+
+UI の文言はすべて日本語。画面は「読み込み」と、タブで切り替える「受付」「登録」の3つ。
+
+### 4.1 読み込み画面（初回）
+1. 「はじめる」ボタンだけを出す。押したら次に進む（カメラの許可はユーザー操作をきっかけに求める）。
+2. カメラの許可を求める。並行してモデルを読み込み、進み具合をバーで出す（`fetch` のストリームで受信バイト数を数える）。
+3. 両方そろったら「受付」タブへ。登録者が0人なら「登録」タブへ。
+
+### 4.2 受付タブ
+- インカメラの映像を全面に出す。鏡のように左右反転して表示し、枠の座標も合わせて反転する。
+- 顔検出はなるべく毎コマ回す。前の推論が終わるまで次のコマは送らない。見つけた顔すべてに枠を描く。
+- 一番大きい顔についてだけ、`RECOGNIZE_INTERVAL_MS`（500ms）ごとに特徴量を出して照合する。
+- 結果の出し方:
+  - 一致あり: 枠の上と画面下部に「あなたは **○○** さんですね?」。小さく類似度も出す（例: 0.72）。
+  - 一致なし: 「登録されていません」
+  - 顔なし: 「カメラに顔を映してください」
+  - 登録者0人: 「まずは登録してください」と「登録」タブへのボタン
+
+### 4.3 登録タブ
+- 上半分: カメラ映像（受付と同じ表示）。下半分: 名前の入力欄と「撮影」ボタン、その下に登録者の一覧。
+- 「撮影」を押すと、`ENROLL_INTERVAL_MS`（400ms）間隔で `ENROLL_SHOTS`（5）枚を自動で撮る。「少し顔の向きを変えてください」と案内し、進み具合を「3 / 5」のように出す。
+- 1枚として数えるのは、顔がちょうど1つ写っていて、スコアがしきい値以上のコマだけ。顔が0個や2個以上なら数えず、「1人だけ映ってください」と出す。
+- `ENROLL_TIMEOUT_MS`（10秒）以内に5枚そろわなければ中止して、その旨を出す。
+- そろったら、5つの特徴量と1枚目の揃えた顔（112×112、JPEG）をサムネイルとして保存する。
+- すでにある名前なら、その人に特徴量を追加する（追加登録）。
+- 名前が空なら「撮影」ボタンは押せない。
+- 登録者の一覧: サムネイル、名前、登録枚数、削除ボタン。最後に「全員削除」（確認ダイアログ付き）。
+
+### 4.4 見た目
+配色や書体などの見た目は、実装計画の最初の UI タスクで、スマホサイズで実際に描画したモックアップを3案出し、そこから選ぶ。この設計で決めるのは、画面の構成と操作の流れまで。
+
+## 5. データと照合
+
+### IndexedDB
+- DB 名 `face-reception`、バージョン 1、オブジェクトストア `people`（キーは `id`）
+
+```ts
+interface Person {
+  id: string;            // crypto.randomUUID()
+  name: string;
+  embeddings: number[][]; // 128次元 × 登録枚数
+  thumbnail: Blob;       // 112×112 JPEG
+  createdAt: number;     // Date.now()
+}
+```
+
+- `store.ts` が公開する操作: `listPeople()`、`addEnrollment(name, embeddings, thumbnail)`（同じ名前があれば特徴量を追加する）、`deletePerson(id)`、`deleteAll()`
+
+### 照合
+- 登録者ごとのスコア = 受付で得た特徴量と、その人の各特徴量とのコサイン類似度の最大値。
+- スコアが一番高い人が `MATCH_THRESHOLD`（0.363、SFace 公式の目安）以上なら、その人と判定する。未満なら「該当なし」。
+- 特徴量は長さ1に正規化してあるので、コサイン類似度は内積で求まる。
+
+### 定数（`src/config.ts`）
+| 名前 | 値 |
+|---|---|
+| `DETECT_INPUT_LONG_SIDE` | 320 |
+| `DETECT_SCORE_THRESHOLD` | 0.8 |
+| `NMS_IOU_THRESHOLD` | 0.3 |
+| `MATCH_THRESHOLD` | 0.363 |
+| `RECOGNIZE_INTERVAL_MS` | 500 |
+| `ENROLL_SHOTS` | 5 |
+| `ENROLL_INTERVAL_MS` | 400 |
+| `ENROLL_TIMEOUT_MS` | 10000 |
+
+## 6. エラーの扱い
+
+| 状況 | 表示と動作 |
+|---|---|
+| カメラを拒否された / カメラがない | 理由と、Safari の設定でカメラを許可する方法を出し、「もう一度試す」ボタンを置く |
+| HTTPS でない | カメラは使えないと出す（Pages は HTTPS。開発時の対策は 8 章） |
+| モデルの読み込みに失敗 | 「読み込みに失敗しました」と「再読み込み」ボタン |
+| ORT の初期化に失敗（古いブラウザなど） | 「このブラウザには対応していません」 |
+| 撮影中に顔がない / 複数ある | そのコマは数えず案内を出す。10秒で中止 |
+| IndexedDB に書けない（プライベートブラウズなど） | 「保存できませんでした」と出す。照合はその場では動かせる |
+| タブが裏に回った | `visibilitychange` でカメラと推論ループを止め、戻ったら再開する |
+
+Worker 内の例外は、要求ごとにエラーとしてメイン側に返す。メイン側の Promise は reject され、UI は上の表に従って表示する。
+
+## 7. テスト
+
+**Vitest による単体テスト**（Node 上で動き、カメラは不要）
+- `detector`: 作った出力テンソルから、枠・5点・スコアが正しく復元されること。NMS で重なった候補が消え、重ならない候補が残ること。余白付きの縮小から元の座標に正しく戻ること。
+- `align`: 既知の相似変換（回転・拡大・平行移動）をかけた5点から、その変換を復元できること。単純なパターン画像を正しく切り出せること。
+- `embedder`: 出力が長さ1に正規化されること。
+- `match`: 最大値の採用、しきい値の境界、登録者0人のときの扱い。
+- `store`: `fake-indexeddb` を使い、追加、同じ名前への追加、削除、全削除を確かめる。
+
+**モデルの読み込みテスト**: Node 上の onnxruntime-web で両モデルを読み込み、ダミー入力で出力の形（YuNet の各 stride の出力、SFace の 1×128）が想定どおりかを見る。
+
+**実機での確認**（自動テストの対象外）: iPhone の Safari で、読み込み、登録、受付（本人・未登録の人）、削除、再読み込み後も登録が残ること、を確かめる。
+
+## 8. 開発と配信
+
+- `npm run dev`: Vite の開発サーバー。iPhone から LAN 越しに確かめるときは、カメラに HTTPS が要るので `@vitejs/plugin-basic-ssl` を入れ、`npm run dev -- --host` で起動する。
+- `npm test`: Vitest
+- `npm run build`: `dist/` に出力。`vite.config.ts` の `base` は `/face-reception/`。
+- GitHub Actions: `main` に push したら `npm ci` → `npm test` → `npm run build` → `actions/upload-pages-artifact` → `actions/deploy-pages`。
+- GitHub 上のリポジトリ `RE-yura/face-reception` は、実装に入る前にユーザーの確認を取ってから作る（公開範囲も確認する）。
+- README には、使い方、データは端末内にだけ保存されること、写真でも通ってしまうという制約、モデルのライセンス表記（YuNet: MIT、SFace: Apache-2.0）を書く。
