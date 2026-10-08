@@ -73,8 +73,8 @@ export async function openPeopleStore(dbName = 'face-reception'): Promise<People
 }
 
 /** Fallback when IndexedDB is unavailable: same behavior, but nothing survives a reload. */
-export function createMemoryPeopleStore(): PeopleStore {
-  const people = new Map<string, Person>();
+export function createMemoryPeopleStore(initial: Person[] = []): PeopleStore {
+  const people = new Map(initial.map((p) => [p.id, p]));
   return {
     async listPeople() {
       return [...people.values()].sort(byCreatedAt);
@@ -90,5 +90,42 @@ export function createMemoryPeopleStore(): PeopleStore {
     async deleteAll() {
       people.clear();
     },
+  };
+}
+
+/**
+ * Uses `primary` until one of its operations fails (a full disk, or a browser refusing storage), then switches for
+ * good to an in-memory store that starts with everyone known so far, and calls `onFallback` once. Enrollment and
+ * matching keep working; what changes after that is lost on reload.
+ */
+export function withMemoryFallback(primary: PeopleStore, onFallback: (error: unknown) => void): PeopleStore {
+  let known: Person[] = [];
+  let memory: Promise<PeopleStore> | undefined;
+  const fallBack = (error: unknown) =>
+    (memory ??= (async () => {
+      const seed = await primary.listPeople().catch(() => known);
+      onFallback(error);
+      return createMemoryPeopleStore(seed);
+    })());
+  const run = async <T>(op: (store: PeopleStore) => Promise<T>): Promise<T> => {
+    if (memory) return op(await memory);
+    try {
+      return await op(primary);
+    } catch (error) {
+      return op(await fallBack(error));
+    }
+  };
+  return {
+    async listPeople() {
+      known = await run((store) => store.listPeople());
+      return known;
+    },
+    async addEnrollment(name, embeddings, thumbnail) {
+      // A bad name is the caller's mistake, not a storage failure.
+      if (!name.trim()) throw new Error('name is empty');
+      return run((store) => store.addEnrollment(name, embeddings, thumbnail));
+    },
+    deletePerson: (id) => run((store) => store.deletePerson(id)),
+    deleteAll: () => run((store) => store.deleteAll()),
   };
 }

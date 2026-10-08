@@ -21,11 +21,10 @@ export class EnrollPanel {
   private objectUrls: string[] = [];
   private cancelCapture: (() => void) | undefined;
 
-  constructor(stage: Stage, store: PeopleStore, volatile: boolean, onPeopleChanged: (people: Person[]) => void) {
+  constructor(stage: Stage, store: PeopleStore, onPeopleChanged: (people: Person[]) => void) {
     this.stage = stage;
     this.store = store;
     this.onPeopleChanged = onPeopleChanged;
-    this.volatileNote.hidden = !volatile;
     this.nameInput.addEventListener('input', () => this.updateButton());
     this.form.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -41,6 +40,11 @@ export class EnrollPanel {
 
   deactivate(): void {
     this.cancelCapture?.();
+  }
+
+  /** Tells the user that enrollments will be gone once the page closes. */
+  showVolatileNote(): void {
+    this.volatileNote.hidden = false;
   }
 
   renderPeople(people: Person[]): void {

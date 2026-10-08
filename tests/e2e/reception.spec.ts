@@ -101,3 +101,21 @@ test('updates the enrollment status only when its text changes', async ({}, test
   expect(await mutations).toBeLessThanOrEqual(8);
   await context.close();
 });
+
+test('keeps enrollments in memory, and still recognizes them, when the device refuses to save', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  await context.addInitScript(() => {
+    IDBObjectStore.prototype.put = () => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    };
+  });
+  const page = await openApp(context);
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator('#volatile-note')).toBeHidden();
+  await enroll(page, 'キム');
+  await expect(page.locator('.person-name')).toHaveText(['キム']);
+  await expect(page.locator('#volatile-note')).toBeVisible();
+  await page.getByRole('tab', { name: '受付' }).click();
+  await expect(page.locator('#reception-message')).toHaveText('あなたは キム さんですね?');
+  await context.close();
+});

@@ -1,7 +1,7 @@
 import './layout.css';
 import './theme.css';
 import { ANALYSIS_STALLED_MESSAGE, cameraProblemMessage, classifyCameraError, initFailureMessage } from './errors.ts';
-import { createMemoryPeopleStore, openPeopleStore, type PeopleStore, type Person } from './store.ts';
+import { createMemoryPeopleStore, openPeopleStore, withMemoryFallback, type PeopleStore, type Person } from './store.ts';
 import { byId } from './ui/dom.ts';
 import { EnrollPanel } from './ui/enroll-panel.ts';
 import { ReceptionPanel } from './ui/reception-panel.ts';
@@ -33,14 +33,23 @@ let resumeToken = 0;
 /** After a camera denial, iOS Safari keeps refusing until the page reloads, even once the setting is changed. */
 let retryReloads = false;
 let panels: Record<Tab, ReceptionPanel | EnrollPanel> | undefined;
+let enrollPanel: EnrollPanel | undefined;
 let activeTab: Tab | undefined;
+/** People are kept only in memory, because IndexedDB could not be opened or stopped accepting writes. */
+let volatileStorage = false;
 
-async function openStore(): Promise<{ store: PeopleStore; volatile: boolean }> {
+function storageBecameVolatile(error: unknown): void {
+  console.error(error);
+  volatileStorage = true;
+  enrollPanel?.showVolatileNote();
+}
+
+async function openStore(): Promise<PeopleStore> {
   try {
-    return { store: await openPeopleStore(), volatile: false };
+    return withMemoryFallback(await openPeopleStore(), storageBecameVolatile);
   } catch (error) {
-    console.error(error);
-    return { store: createMemoryPeopleStore(), volatile: true };
+    storageBecameVolatile(error);
+    return createMemoryPeopleStore();
   }
 }
 
@@ -82,12 +91,14 @@ async function boot(): Promise<void> {
 }
 
 async function createPanels(): Promise<Record<Tab, ReceptionPanel | EnrollPanel>> {
-  const { store, volatile } = await storeReady;
+  const store = await storeReady;
   people = await store.listPeople().catch(() => []);
-  const enroll = new EnrollPanel(stage, store, volatile, (list) => {
+  const enroll = new EnrollPanel(stage, store, (list) => {
     people = list;
     enroll.renderPeople(list);
   });
+  enrollPanel = enroll;
+  if (volatileStorage) enroll.showVolatileNote();
   enroll.renderPeople(people);
   const reception = new ReceptionPanel(stage, () => people, () => selectTab('enroll'));
   for (const tab of TABS) tabButtons[tab].addEventListener('click', () => selectTab(tab));
