@@ -24,7 +24,7 @@
 - Vite の `base` は `/face-reception/`。
 - しきい値などの定数は `src/config.ts` にだけ置く（`MATCH_THRESHOLD = 0.363` ほか）。
 - 画面の文言はすべて日本語で、各タスクに書いた文字列をそのまま使う（E2E が文字列で照合する）。
-- 顔の画像・特徴量は端末の外に出さない。アプリが行う通信は、同じオリジンのアプリ本体とモデルの取得だけ。
+- 顔の画像・特徴量は端末の外に出さない。アプリが行う通信は、同じオリジンのアプリ本体とモデルの取得、それに Google Fonts の書体の取得だけ（Task 7）。
 - TypeScript は `tsconfig.json` の `erasableSyntaxOnly`（パラメータプロパティ・enum・namespace 禁止）と `verbatimModuleSyntax`（型は `import type`）に従い、相対 import には `.ts` 拡張子を付ける。
 - 対応ブラウザ: iOS 17 以降の Safari、最新のデスクトップ Chrome / Safari / Firefox。
 - コミットメッセージの末尾には必ず次の2行を付ける:
