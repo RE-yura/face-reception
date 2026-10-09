@@ -87,6 +87,8 @@ async function boot(): Promise<void> {
   booting = false;
   if (loaded.status === 'rejected') {
     const reason = loaded.reason instanceof InitError ? loaded.reason.reason : 'unsupported';
+    // Without a retry nothing will use the camera, so release it instead of leaving its indicator on.
+    if (reason !== 'network') stage.stop();
     retryReloads = false;
     startScreen.showError(initFailureMessage(reason), reason === 'network');
     return;

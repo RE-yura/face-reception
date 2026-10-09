@@ -168,3 +168,40 @@ test('downloads again on tap when the download failed before the tap, without an
   await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
   await context.close();
 });
+
+test('keeps the start button in place from the first paint, before the app script has run', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  // Holds the app script, so the page is painted before it runs, as on a slow first visit.
+  const script = await holdRequests(context, '**/assets/index-*.js');
+  const page = await context.newPage();
+  await page.goto(APP_URL, { waitUntil: 'commit' });
+  const start = page.getByRole('button', { name: 'はじめる' });
+  await expect(start).toBeVisible();
+  const beforeScript = await start.boundingBox();
+  script.release();
+  await expect(page.locator('#load-status')).toBeVisible();
+  expect(await start.boundingBox()).toEqual(beforeScript);
+  await context.close();
+});
+
+test('reports an unusable browser on tap without leaving the camera on', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  // The right size, so the download succeeds, but not a model ONNX Runtime can load.
+  await context.route(`**/models/${MODELS.yunet.file}`, (route) => route.fulfill({ status: 200, body: Buffer.alloc(MODELS.yunet.bytes) }));
+  const sfaceStopped = context.waitForEvent('requestfailed', {
+    predicate: (request) => request.url().endsWith(MODELS.sface.file),
+    timeout: 30_000,
+  });
+  const page = await context.newPage();
+  await page.goto(APP_URL);
+  await sfaceStopped;
+  await expect(page.locator('#load-status')).toBeHidden();
+  await page.getByRole('button', { name: 'はじめる' }).click();
+  await expect(page.locator('#start-error-message')).toContainText('このブラウザには対応していません', { timeout: 60_000 });
+  const cameraLive = await page.evaluate(() => {
+    const stream = (document.getElementById('camera') as HTMLVideoElement).srcObject;
+    return stream instanceof MediaStream && stream.getVideoTracks().some((track) => track.readyState === 'live');
+  });
+  expect(cameraLive).toBe(false);
+  await context.close();
+});

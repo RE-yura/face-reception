@@ -15,7 +15,7 @@ export const MODELS = {
 /** Size of onnxruntime-web's ort-wasm-simd-threaded.wasm, downloaded with the models. Update it with onnxruntime-web. */
 export const ORT_WASM_BYTES = 14_239_897;
 
-/** A model download gives up when no data arrives for this long. */
+/** A model download gives up when no data arrives for about this long (see IDLE_CHECKS in model-download.ts). */
 export const DOWNLOAD_IDLE_TIMEOUT_MS = 20_000;
 
 /** An analysis the worker has not answered within this long counts as stalled. */

@@ -18,9 +18,9 @@ export class StartScreen {
     this.retryButton.addEventListener('click', handler);
   }
 
-  /** Shows the progress of the models loading in the background, under the start button. */
+  /** Shows the progress of the models loading in the background, in the space kept for it under the start button. */
   showPreloading(): void {
-    this.status.hidden = false;
+    this.status.classList.remove('load-status-idle');
   }
 
   /** The background load is over. Until the start button is pressed, its progress goes away but keeps its space. */

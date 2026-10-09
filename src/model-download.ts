@@ -9,7 +9,7 @@ export class DownloadError extends Error {}
 
 export interface DownloadOptions {
   onProgress: (loaded: number, total: number) => void;
-  /** Gives up when no data arrives for this long. */
+  /** Gives up when no data arrives for about this long: at least 19/20 of it, as it is counted in IDLE_CHECKS checks. */
   idleTimeoutMs: number;
   /** Aborting it stops every download. */
   signal?: AbortSignal;
