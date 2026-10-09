@@ -1,4 +1,5 @@
 import { chromium, expect, test, type BrowserContext } from '@playwright/test';
+import { MODELS } from '../../src/config.ts';
 import { APP_URL, launchWithFace, newProfile, openApp } from './helpers.ts';
 
 test('loads the models and draws a box around the face the camera sees', async ({}, testInfo) => {
@@ -115,5 +116,20 @@ test('offers a retry when the inference engine fails to download', async ({}, te
   await context.unroute('**/*.wasm');
   await page.getByRole('button', { name: 'もう一度試す' }).click();
   await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});
+
+test('stops downloading the large model once the browser turns out unable to run the detector', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  // The right size, so the download succeeds, but not a model ONNX Runtime can load.
+  await context.route(`**/models/${MODELS.yunet.file}`, (route) => route.fulfill({ status: 200, body: Buffer.alloc(MODELS.yunet.bytes) }));
+  await holdRequests(context, `**/models/${MODELS.sface.file}`);
+  let sfaceAborted = false;
+  context.on('requestfailed', (request) => {
+    if (request.url().endsWith(MODELS.sface.file)) sfaceAborted = true;
+  });
+  const page = await openApp(context);
+  await expect(page.locator('#start-error-message')).toContainText('このブラウザには対応していません', { timeout: 60_000 });
+  await expect.poll(() => sfaceAborted).toBe(true);
   await context.close();
 });

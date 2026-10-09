@@ -30,13 +30,18 @@ async function init(modelBaseUrl: string): Promise<void> {
   }
   // The wasm goes through the same download as the models, so a slow or broken connection while it loads
   // gets the idle timeout, the size check and a retry, instead of looking like an unsupported browser.
+  const stop = new AbortController();
   const [yunet, wasm, sface] = downloadFiles(
     [
       { url: `${modelBaseUrl}${MODELS.yunet.file}`, bytes: MODELS.yunet.bytes },
       { url: wasmUrl, bytes: ORT_WASM_BYTES },
       { url: `${modelBaseUrl}${MODELS.sface.file}`, bytes: MODELS.sface.bytes },
     ],
-    { onProgress: (loaded, total) => send({ type: 'progress', loaded, total }), idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS },
+    {
+      onProgress: (loaded, total) => send({ type: 'progress', loaded, total }),
+      idleTimeoutMs: DOWNLOAD_IDLE_TIMEOUT_MS,
+      signal: stop.signal,
+    },
   );
   const yunetWithRuntime = Promise.all([yunet, wasm]).then(([model, binary]) => {
     ort.env.wasm.wasmBinary = binary;
@@ -45,6 +50,8 @@ async function init(modelBaseUrl: string): Promise<void> {
   try {
     pipeline = await FacePipeline.create(yunetWithRuntime, sface);
   } catch (error) {
+    // When YuNet cannot be loaded, SFace (about 36MB) may still be on its way; it is no use now.
+    stop.abort();
     send({ type: 'init-error', reason: error instanceof DownloadError ? 'network' : 'unsupported', message: String(error) });
     return;
   }
