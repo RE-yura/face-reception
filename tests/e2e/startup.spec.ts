@@ -205,3 +205,20 @@ test('reports an unusable browser on tap without leaving the camera on', async (
   expect(cameraLive).toBe(false);
   await context.close();
 });
+
+test('keeps the screen still when the start button is pressed, leaving the button in place as pressed', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  // Holds the large model, so the loading screen stays up.
+  await holdRequests(context, `**/models/${MODELS.sface.file}`);
+  const page = await context.newPage();
+  await page.goto(APP_URL);
+  await expect(page.locator('#load-status')).toBeVisible();
+  const title = page.locator('.title');
+  const before = await title.boundingBox();
+  const start = page.getByRole('button', { name: 'はじめる' });
+  await start.click();
+  await expect(start).toBeVisible();
+  await expect(start).toBeDisabled();
+  expect(await title.boundingBox()).toEqual(before);
+  await context.close();
+});

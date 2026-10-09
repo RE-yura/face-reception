@@ -25,12 +25,14 @@ export class StartScreen {
 
   /** The background load is over. Until the start button is pressed, its progress goes away but keeps its space. */
   endPreloading(): void {
-    if (!this.startButton.hidden) this.status.classList.add('load-status-idle');
+    if (!this.startButton.hidden && !this.startButton.disabled) this.status.classList.add('load-status-idle');
   }
 
+  /** Keeps the start button in place, pressed and disabled, so nothing on the screen moves. */
   showLoading(): void {
     this.root.hidden = false;
-    this.startButton.hidden = true;
+    this.startButton.hidden = false;
+    this.startButton.disabled = true;
     this.error.hidden = true;
     this.status.hidden = false;
     this.status.classList.remove('load-status-idle');
