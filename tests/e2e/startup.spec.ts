@@ -133,3 +133,38 @@ test('stops downloading the large model once the browser turns out unable to run
   await expect.poll(() => sfaceAborted).toBe(true);
   await context.close();
 });
+
+test('starts downloading the models when the page opens, with the progress under the start button', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  const sface = await holdRequests(context, `**/models/${MODELS.sface.file}`);
+  const page = await context.newPage();
+  await page.goto(APP_URL);
+  await expect.poll(sface.requested).toBe(true);
+  const start = page.getByRole('button', { name: 'はじめる' });
+  await expect(start).toBeVisible();
+  await expect(page.locator('#load-message')).toContainText('モデルを読み込んでいます');
+  const whileLoading = await start.boundingBox();
+  sface.release();
+  await expect(page.locator('body')).toHaveAttribute('data-models', 'ready', { timeout: 60_000 });
+  await expect(page.locator('#load-status')).toBeHidden();
+  // The progress keeps its space, so the button does not move under a finger about to tap it.
+  expect(await start.boundingBox()).toEqual(whileLoading);
+  await start.click();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});
+
+test('downloads again on tap when the download failed before the tap, without an error first', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  await context.route('**/models/*.onnx', (route) => route.abort());
+  const failed = context.waitForEvent('requestfailed', { predicate: (request) => request.url().includes('/models/'), timeout: 30_000 });
+  const page = await context.newPage();
+  await page.goto(APP_URL);
+  await failed;
+  await expect(page.locator('#load-status')).toBeHidden();
+  await expect(page.locator('#start-error')).toBeHidden();
+  await context.unroute('**/models/*.onnx');
+  await page.getByRole('button', { name: 'はじめる' }).click();
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await context.close();
+});

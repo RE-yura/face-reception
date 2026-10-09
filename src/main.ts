@@ -1,6 +1,7 @@
 import './layout.css';
 import './theme.css';
 import { ANALYSIS_STALLED_MESSAGE, cameraProblemMessage, classifyCameraError, initFailureMessage } from './errors.ts';
+import { ModelLoad } from './model-load.ts';
 import { createMemoryPeopleStore, openPeopleStore, withMemoryFallback, type PeopleStore, type Person } from './store.ts';
 import { byId } from './ui/dom.ts';
 import { EnrollPanel } from './ui/enroll-panel.ts';
@@ -18,11 +19,14 @@ const tabButtons: Record<Tab, HTMLButtonElement> = { reception: byId('tab-recept
 const tabPanels: Record<Tab, HTMLElement> = { reception: byId('panel-reception'), enroll: byId('panel-enroll') };
 
 const client = new VisionClient();
+const models = new ModelLoad(
+  (onProgress) => client.init(onProgress),
+  (ratio) => startScreen.setProgress(ratio),
+);
 const stage = new Stage(byId('stage'), byId('camera'), byId('overlay'), client);
 const storeReady = openStore();
 
 let people: Person[] = [];
-let modelsReady = false;
 let booting = false;
 /** The main screen is up. Whether the camera and detection run then follows page visibility. */
 let running = false;
@@ -59,21 +63,30 @@ function showCameraError(error: unknown): void {
   startScreen.showError(cameraProblemMessage(problem), true);
 }
 
+/** Starts loading the models, or joins the load under way or done. */
+function loadModels(): Promise<void> {
+  const attempt = models.start();
+  attempt.then(
+    () => {
+      document.body.dataset.models = 'ready';
+      startScreen.endPreloading();
+    },
+    () => startScreen.endPreloading(),
+  );
+  return attempt;
+}
+
 async function boot(): Promise<void> {
   if (booting) return;
   booting = true;
   startScreen.showLoading();
-  const [camera, models] = await Promise.allSettled([
+  const [camera, loaded] = await Promise.allSettled([
     stage.cameraLive() ? Promise.resolve(true) : stage.openCamera(),
-    modelsReady ? Promise.resolve() : client.init((ratio) => startScreen.setProgress(ratio)),
+    loadModels(),
   ]);
   booting = false;
-  if (models.status === 'fulfilled') {
-    modelsReady = true;
-    document.body.dataset.models = 'ready';
-  }
-  if (models.status === 'rejected') {
-    const reason = models.reason instanceof InitError ? models.reason.reason : 'unsupported';
+  if (loaded.status === 'rejected') {
+    const reason = loaded.reason instanceof InitError ? loaded.reason.reason : 'unsupported';
     retryReloads = false;
     startScreen.showError(initFailureMessage(reason), reason === 'network');
     return;
@@ -164,3 +177,8 @@ document.addEventListener('visibilitychange', () => {
 
 startScreen.onStart(() => void boot());
 startScreen.onRetry(() => (retryReloads ? location.reload() : void boot()));
+
+// Download the models right away, so they may be ready by the time the start button is pressed.
+// A failure here shows nothing yet: pressing the button tries again, or reports it.
+startScreen.showPreloading();
+void loadModels();

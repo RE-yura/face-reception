@@ -49,6 +49,11 @@ body {
   width: 100%;
 }
 
+/* Keeps its space while idle, so the start button above does not move when the progress goes away. */
+.load-status-idle {
+  visibility: hidden;
+}
+
 .main-screen {
   flex: 1;
   min-height: 0;
