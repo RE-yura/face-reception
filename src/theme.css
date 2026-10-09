@@ -1,4 +1,4 @@
-/* ロビー — ホテルの受付カウンター。深緑のフェルトと真鍮、見出しは明朝 */
+/* ロビー — ホテルの受付カウンター。深緑のフェルトと真鍮。書体は Zen Kaku Gothic New だけを使う */
 :root {
   --bg: #f3f4ef;
   --fg: #1d2b27;
@@ -13,7 +13,6 @@
   --box-accent: #c1923a;
   --label-fg: #1d2b27;
   --label-font: bold 16px 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
-  --font-display: 'Zen Old Mincho', 'Hiragino Mincho ProN', serif;
   --font-body: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
 }
 
@@ -25,7 +24,6 @@ body {
 
 .title {
   margin: 0;
-  font-family: var(--font-display);
   font-weight: 700;
   font-size: 2.25rem;
   letter-spacing: 0.08em;
@@ -171,7 +169,7 @@ body {
 }
 
 .reception-name {
-  font-family: var(--font-display);
+  font-weight: 700;
   font-size: 1.9rem;
   color: var(--green);
   border-bottom: 2px solid var(--brass);

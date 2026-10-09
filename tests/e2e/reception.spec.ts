@@ -119,3 +119,17 @@ test('keeps enrollments in memory, and still recognizes them, when the device re
   await expect(page.locator('#reception-message')).toHaveText('あなたは キム さんですね?');
   await context.close();
 });
+
+test('shows every text in one typeface, including the title and the recognized name', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  const page = await openApp(context);
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await enroll(page, 'キム');
+  await page.getByRole('tab', { name: '受付' }).click();
+  await expect(page.locator('.reception-name')).toHaveText('キム');
+  const families = await page.evaluate(() => [
+    ...new Set([...document.querySelectorAll('body *')].map((element) => getComputedStyle(element).fontFamily)),
+  ]);
+  expect(families).toHaveLength(1);
+  await context.close();
+});
