@@ -11,27 +11,36 @@ export interface DownloadOptions {
   onProgress: (loaded: number, total: number) => void;
   /** Gives up when no data arrives for this long. */
   idleTimeoutMs: number;
+  /** Aborting it stops every download. */
+  signal?: AbortSignal;
   fetch?: typeof fetch;
 }
 
 /**
+ * The idle timeout is counted in checks rather than measured on the clock. While the page sleeps (Safari in the
+ * background), no check runs, so the time asleep counts as one check at most instead of a long silence.
+ */
+const IDLE_CHECKS = 20;
+
+/**
  * Downloads the files in parallel and checks each one's size. Returns one promise per file, so a caller can use a
- * small file before the large ones arrive. When any download fails, the others are aborted, and every promise
- * rejects with a DownloadError.
+ * small file before the large ones arrive. When any download fails, or the caller aborts `signal`, the others are
+ * aborted, and every promise rejects with a DownloadError.
  */
 export function downloadFiles(files: readonly DownloadFile[], options: DownloadOptions): Promise<Uint8Array>[] {
-  const { onProgress, idleTimeoutMs, fetch: fetchFile = fetch } = options;
+  const { onProgress, idleTimeoutMs, signal: stopSignal, fetch: fetchFile = fetch } = options;
   const controller = new AbortController();
+  const stop = () => controller.abort(stopSignal?.reason);
+  if (stopSignal?.aborted) stop();
+  else stopSignal?.addEventListener('abort', stop);
   const total = files.reduce((n, f) => n + f.bytes, 0);
   let loaded = 0;
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  const keepAlive = () => {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => controller.abort(new DownloadError(`no data for ${idleTimeoutMs} ms`)), idleTimeoutMs);
-  };
-  keepAlive();
+  let quietChecks = 0;
+  const idleCheck = setInterval(() => {
+    if (++quietChecks >= IDLE_CHECKS) controller.abort(new DownloadError(`no data for ${idleTimeoutMs} ms`));
+  }, idleTimeoutMs / IDLE_CHECKS);
   const onChunk = (n: number) => {
-    keepAlive();
+    quietChecks = 0;
     loaded += n;
     onProgress(loaded, total);
   };
@@ -42,7 +51,10 @@ export function downloadFiles(files: readonly DownloadFile[], options: DownloadO
       throw failure;
     }),
   );
-  void Promise.allSettled(downloads).then(() => clearTimeout(idleTimer));
+  void Promise.allSettled(downloads).then(() => {
+    clearInterval(idleCheck);
+    stopSignal?.removeEventListener('abort', stop);
+  });
   return downloads;
 }
 
@@ -54,6 +66,8 @@ async function download(
   onChunk: (n: number) => void,
 ): Promise<Uint8Array> {
   const res = await fetchFile(url, { signal });
+  // An abort that came while the request was starting would never reach the listener below.
+  signal.throwIfAborted();
   if (!res.ok || !res.body) throw new DownloadError(`${url}: HTTP ${res.status}`);
   const bytes = new Uint8Array(expected);
   let offset = 0;
