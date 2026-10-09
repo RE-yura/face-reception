@@ -40,7 +40,8 @@ export class FacePipeline {
       const sface = await ort.InferenceSession.create(await sfaceBytes, opts);
       return new FacePipeline(yunet, sface);
     } catch (error) {
-      await yunet.release();
+      // The download or model error is the one to report; a failure to free YuNet must not replace it.
+      await yunet.release().catch(() => {});
       throw error;
     }
   }

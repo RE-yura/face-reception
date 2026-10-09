@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web/wasm';
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { DETECT_INPUT_LONG_SIDE, DETECT_SCORE_THRESHOLD, MATCH_THRESHOLD, MODELS, NMS_IOU_THRESHOLD } from '../../src/config.ts';
 import { dot } from '../../src/match.ts';
 import { DownloadError } from '../../src/model-download.ts';
@@ -108,6 +108,20 @@ describe('FacePipeline.create', () => {
     const failure = new DownloadError('connection lost');
     const created = FacePipeline.create(Promise.resolve(readModel(MODELS.yunet.file)), Promise.reject(failure));
     await expect(created).rejects.toBe(failure);
+  });
+
+  it('passes on a download failure even when freeing the detector fails', async () => {
+    // Typed as a factory, but at runtime InferenceSession is the class of the sessions create() returns.
+    const sessionClass = ort.InferenceSession as unknown as { prototype: ort.InferenceSession };
+    const release = vi.spyOn(sessionClass.prototype, 'release').mockRejectedValue(new Error('release failed'));
+    try {
+      const failure = new DownloadError('connection lost');
+      const created = FacePipeline.create(readModel(MODELS.yunet.file), Promise.reject(failure));
+      await expect(created).rejects.toBe(failure);
+      expect(release).toHaveBeenCalled();
+    } finally {
+      release.mockRestore();
+    }
   });
 
   it('creates a working pipeline from models given as promises', async () => {
