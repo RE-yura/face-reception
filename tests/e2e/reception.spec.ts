@@ -133,3 +133,29 @@ test('shows every text in one typeface, including the title and the recognized n
   expect(families).toHaveLength(1);
   await context.close();
 });
+
+test('keeps the people list right when the device fails to read it back after a change', async ({}, testInfo) => {
+  const context = await launchWithFace(newProfile(), 'kim', testInfo.outputDir);
+  await context.addInitScript(() => {
+    // Writes work, but every read-only read fails, as on a flaky device.
+    const getAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = function (this: IDBObjectStore, ...args: Parameters<IDBObjectStore['getAll']>) {
+      if (this.transaction.mode === 'readonly') throw new DOMException('The read failed.', 'UnknownError');
+      return getAll.apply(this, args);
+    };
+  });
+  const errors: Error[] = [];
+  context.on('weberror', (webError) => errors.push(webError.error()));
+  const page = await openApp(context);
+  await expect(page.locator('#main-screen')).toBeVisible({ timeout: 60_000 });
+  await enroll(page, 'キム');
+  await expect(page.locator('.person-name')).toHaveText(['キム']);
+  await page.getByRole('button', { name: 'キム さんを削除' }).click();
+  await expect(page.locator('#people-empty')).toBeVisible();
+  await enroll(page, 'キム');
+  page.once('dialog', (dialog) => void dialog.accept());
+  await page.getByRole('button', { name: '全員削除' }).click();
+  await expect(page.locator('#people-empty')).toBeVisible();
+  expect(errors).toEqual([]);
+  await context.close();
+});

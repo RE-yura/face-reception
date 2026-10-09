@@ -19,6 +19,8 @@ export class EnrollPanel {
   private readonly store: PeopleStore;
   private readonly onPeopleChanged: (people: Person[]) => void;
   private objectUrls: string[] = [];
+  /** The people on the list, as last rendered. */
+  private people: Person[] = [];
   private cancelCapture: (() => void) | undefined;
 
   constructor(stage: Stage, store: PeopleStore, onPeopleChanged: (people: Person[]) => void) {
@@ -48,6 +50,7 @@ export class EnrollPanel {
   }
 
   renderPeople(people: Person[]): void {
+    this.people = people;
     for (const url of this.objectUrls) URL.revokeObjectURL(url);
     this.objectUrls = [];
     this.list.replaceChildren(...people.map((person) => this.personItem(person)));
@@ -142,8 +145,9 @@ export class EnrollPanel {
   private async save(name: string, embeddings: Float32Array[], aligned: RgbaImage): Promise<void> {
     try {
       const thumbnail = await toJpegBlob(aligned);
-      await this.store.addEnrollment(name, embeddings, thumbnail);
-      this.onPeopleChanged(await this.store.listPeople());
+      const person = await this.store.addEnrollment(name, embeddings, thumbnail);
+      const known = this.people.some((p) => p.id === person.id);
+      await this.refresh(known ? this.people.map((p) => (p.id === person.id ? person : p)) : [...this.people, person]);
       this.nameInput.value = '';
       this.updateButton();
       this.setStatus(`${name} さんを登録しました。`);
@@ -155,12 +159,26 @@ export class EnrollPanel {
 
   private async deletePerson(id: string): Promise<void> {
     await this.store.deletePerson(id);
-    this.onPeopleChanged(await this.store.listPeople());
+    await this.refresh(this.people.filter((p) => p.id !== id));
   }
 
   private async deleteAll(): Promise<void> {
     if (!window.confirm('登録した人をすべて削除しますか？')) return;
     await this.store.deleteAll();
-    this.onPeopleChanged(await this.store.listPeople());
+    await this.refresh([]);
+  }
+
+  /**
+   * Reads the people back after a change and passes them on. If the read fails, passes on `expected`, the list the
+   * change left, so the list and the matching never keep someone who was deleted or miss someone just enrolled.
+   */
+  private async refresh(expected: Person[]): Promise<void> {
+    let people = expected;
+    try {
+      people = await this.store.listPeople();
+    } catch (error) {
+      console.error(error);
+    }
+    this.onPeopleChanged(people);
   }
 }
